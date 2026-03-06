@@ -276,29 +276,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - 识别结果处理
 
     private func handleRecognitionResult(_ result: PipelineResult) {
-        // 隐藏录音悬浮窗
-        recordingOverlay.hide()
+        // 后处理：清理识别结果
+        let cleanedText = TextPostProcessor.clean(result.text)
+        let lang = result.lang.isEmpty ? TextPostProcessor.extractLanguage(result.text) : result.lang
+        let langName = TextPostProcessor.languageName(lang)
 
-        if result.isEmpty {
-            fputs("[AppDelegate] ℹ️ 识别结果为空（静音或识别失败）\n", stderr)
+        if cleanedText.isEmpty {
+            fputs("[AppDelegate] ℹ️ 识别结果为空或无意义（原文: \"\(result.text)\"）\n", stderr)
+            recordingOverlay.setStatus("未检测到有效语音")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                self?.recordingOverlay.hide()
+            }
             statusBar.setState(.idle)
             return
         }
 
-        fputs("[AppDelegate] ✅ 识别结果: \"\(result.text)\"\n", stderr)
+        fputs("[AppDelegate] ✅ 识别结果: \"\(cleanedText)\" [lang=\(lang), RTF=\(String(format: "%.3f", result.processingTime / max(result.duration, 0.001)))]\n", stderr)
 
-        // 更新图标为完成状态（200ms 后自动恢复）
-        statusBar.setState(.done, autoresetAfter: 0.8)
+        // 更新悬浮窗显示结果
+        let displayLang = langName.isEmpty ? "" : "[\(langName)] "
+        recordingOverlay.setStatus("\(displayLang)\(cleanedText)")
+
+        // 延迟隐藏悬浮窗（让用户看到结果）
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+            self?.recordingOverlay.hide()
+        }
+
+        // 更新图标为完成状态
+        statusBar.setState(.done, autoresetAfter: 1.0)
 
         // 注入文本到当前焦点输入框
-        let injected = textInjector.inject(text: result.text)
+        let injected = textInjector.inject(text: cleanedText)
         if !injected {
             fputs("[AppDelegate] ⚠️ 文本注入失败\n", stderr)
         }
 
         // 发送系统通知（如果设置了）
         if settings.showNotification {
-            sendNotification(text: result.text, lang: result.lang)
+            sendNotification(text: cleanedText, lang: lang)
         }
     }
 

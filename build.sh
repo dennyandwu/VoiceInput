@@ -49,6 +49,7 @@ swiftc \
   "$SOURCES_DIR/HotkeyRecorderWindow.swift" \
   "$SOURCES_DIR/RecordingOverlayWindow.swift" \
   "$SOURCES_DIR/UpdateChecker.swift" \
+  "$SOURCES_DIR/TextPostProcessor.swift" \
   "$SOURCES_DIR/AppDelegate.swift" \
   "$SOURCES_DIR/main.swift" \
   -L "$LIB_DIR" \

@@ -10,7 +10,7 @@ cd "$SCRIPT_DIR"
 
 # ─── 配置 ───────────────────────────────────────────────────────────────────
 APP_NAME="VoiceInput"
-APP_VERSION="0.3.0"
+APP_VERSION="1.0.0-beta"
 BUNDLE_ID="com.urdao.voiceinput"
 
 SHERPA_DIR="$SCRIPT_DIR/sherpa-onnx-v1.12.28-osx-universal2-shared"
@@ -28,8 +28,8 @@ DMG_NAME="$APP_NAME-v$APP_VERSION-macos-arm64.dmg"
 DMG_PATH="$DIST_DIR/$DMG_NAME"
 
 # ─── 颜色输出 ────────────────────────────────────────────────────────────────
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-BLUE='\033[0;34m'; NC='\033[0m'
+RED='\1.0.0-beta;31m'; GREEN='\1.0.0-beta;32m'; YELLOW='\033[1;33m'
+BLUE='\1.0.0-beta;34m'; NC='\1.0.0-betam'
 info()    { echo -e "${BLUE}[INFO]${NC} $*"; }
 success() { echo -e "${GREEN}[✅]${NC} $*"; }
 warn()    { echo -e "${YELLOW}[WARN]${NC} $*"; }
@@ -76,7 +76,10 @@ cp "$LIB_DIR/libsherpa-onnx-c-api.dylib" "$APP_FRAMEWORKS/"
 cp "$LIB_DIR/libonnxruntime.1.23.2.dylib" "$APP_FRAMEWORKS/"
 
 # 3d. 应用图标
-if [ -f "/tmp/AppIcon.icns" ]; then
+if [ -f "$SCRIPT_DIR/Resources/AppIcon.icns" ]; then
+    info "  复制应用图标..."
+    cp "$SCRIPT_DIR/Resources/AppIcon.icns" "$APP_RESOURCES/AppIcon.icns"
+elif [ -f "/tmp/AppIcon.icns" ]; then
     info "  复制应用图标..."
     cp "/tmp/AppIcon.icns" "$APP_RESOURCES/AppIcon.icns"
 else
@@ -200,7 +203,7 @@ cp "$SCRIPT_DIR/UNINSTALL.md" "$DMG_STAGING/"
 
 # 创建 README 文件
 cat > "$DMG_STAGING/README.md" << 'README_EOF'
-# VoiceInput v0.3.0
+# VoiceInput v1.0.0-beta
 
 本地离线语音识别输入法，基于 SenseVoice + Sherpa-ONNX。
 
