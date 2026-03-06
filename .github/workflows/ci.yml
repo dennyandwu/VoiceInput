@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, dev]
+  push:
+    branches: [dev]
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download sherpa-onnx
+        run: |
+          curl -L -o sherpa-onnx.tar.bz2 \
+            "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.12.28/sherpa-onnx-v1.12.28-osx-universal2-shared.tar.bz2"
+          tar xjf sherpa-onnx.tar.bz2
+
+      - name: Build
+        run: bash build.sh
+
+      - name: Verify binary
+        run: |
+          file VoiceInput
+          otool -L VoiceInput | head -10

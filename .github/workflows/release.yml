@@ -1,0 +1,47 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-release:
+    runs-on: macos-14
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Download sherpa-onnx
+        run: |
+          curl -L -o sherpa-onnx.tar.bz2 \
+            "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.12.28/sherpa-onnx-v1.12.28-osx-universal2-shared.tar.bz2"
+          tar xjf sherpa-onnx.tar.bz2
+
+      - name: Download models
+        run: |
+          mkdir -p Resources/models/sense-voice Resources/models/silero-vad
+          # int8 model
+          curl -L -o Resources/models/sense-voice/model.int8.onnx \
+            "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17-model.int8.onnx"
+          # tokens
+          curl -L -o Resources/models/sense-voice/tokens.txt \
+            "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17-tokens.txt"
+          # silero-vad
+          curl -L -o Resources/models/silero-vad/silero_vad.onnx \
+            "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx"
+
+      - name: Build app bundle + DMG
+        run: bash build_app.sh
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/VoiceInput-v*.dmg
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') }}
