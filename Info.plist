@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>VoiceInput</string>
+    <key>CFBundleDisplayName</key>
+    <string>VoiceInput</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.urdao.voiceinput</string>
+    <key>CFBundleVersion</key>
+    <string>0.3.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.3.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleExecutable</key>
+    <string>VoiceInput</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>VoiceInput 需要麦克风权限来进行语音识别。所有音频数据仅在本地处理，不会上传到任何服务器。</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>LSArchitecturePriority</key>
+    <array>
+        <string>arm64</string>
+    </array>
+</dict>
+</plist>

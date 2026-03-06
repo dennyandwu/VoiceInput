@@ -1,0 +1,218 @@
+// Sources/VoiceInput/TextInjector.swift
+// 文本注入 - 将识别结果注入当前聚焦应用
+// Phase 3 实现
+// Copyright (c) 2026 urDAO Investment
+
+import Foundation
+import AppKit
+import CoreGraphics
+import ApplicationServices
+
+/// TextInjector 将识别文本注入当前活跃窗口
+///
+/// 支持两种方案：
+/// - clipboard（主方案）：保存剪贴板 → 写入识别文本 → 模拟 Cmd+V → 恢复剪贴板
+/// - accessibility（备选）：通过 AXUIElement 直接写入焦点元素
+class TextInjector {
+
+    // MARK: - Types
+
+    enum Method {
+        case clipboard     // Pasteboard + Cmd+V（兼容性最好）
+        case accessibility // AXUIElement（部分 app 可用）
+    }
+
+    // MARK: - Properties
+
+    var method: Method = .clipboard
+
+    /// Cmd+V 发送后等待应用处理的延迟（ms）
+    var pasteDelayMs: Int = 100
+
+    /// 恢复剪贴板前的延迟（ms），需比 pasteDelay 长
+    var restoreDelayMs: Int = 150
+
+    // MARK: - Public API
+
+    /// 将文本注入当前焦点窗口
+    /// - Parameter text: 要注入的文本
+    /// - Returns: true 表示注入成功（或已发出注入指令）
+    @discardableResult
+    func inject(text: String) -> Bool {
+        guard !text.isEmpty else { return true }
+
+        switch method {
+        case .clipboard:
+            return injectViaClipboard(text: text)
+        case .accessibility:
+            let success = injectViaAccessibility(text: text)
+            if !success {
+                fputs("[TextInjector] Accessibility 注入失败，降级到 clipboard\n", stderr)
+                return injectViaClipboard(text: text)
+            }
+            return true
+        }
+    }
+
+    /// 检查所需权限
+    func checkPermission() -> Bool {
+        return AXIsProcessTrusted()
+    }
+
+    // MARK: - Clipboard 方案
+
+    private func injectViaClipboard(text: String) -> Bool {
+        let pasteboard = NSPasteboard.general
+
+        // 1. 保存当前剪贴板所有内容
+        let savedItems = saveClipboard(pasteboard: pasteboard)
+        fputs("[TextInjector] 剪贴板已保存（\(savedItems.count) 项）\n", stderr)
+
+        // 2. 清空剪贴板，写入识别文本
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        fputs("[TextInjector] 写入识别文本到剪贴板\n", stderr)
+
+        // 3. 模拟 Cmd+V
+        let didPost = postCmdV()
+        if !didPost {
+            fputs("[TextInjector] ⚠️  Cmd+V 发送失败\n", stderr)
+        } else {
+            fputs("[TextInjector] ✅ Cmd+V 已发送\n", stderr)
+        }
+
+        // 4. 延迟恢复剪贴板（给目标应用时间处理粘贴）
+        let restoreMs = restoreDelayMs
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(restoreMs)) { [weak self] in
+            self?.restoreClipboard(pasteboard: pasteboard, items: savedItems)
+            fputs("[TextInjector] 剪贴板已恢复\n", stderr)
+        }
+
+        return didPost
+    }
+
+    // MARK: - Clipboard Save / Restore
+
+    /// 保存剪贴板内容（支持所有类型：文本、图片、文件等）
+    private func saveClipboard(pasteboard: NSPasteboard) -> [SavedPasteboardItem] {
+        guard let items = pasteboard.pasteboardItems else { return [] }
+
+        return items.compactMap { item -> SavedPasteboardItem? in
+            var typeDataMap: [NSPasteboard.PasteboardType: Data] = [:]
+            for type in item.types {
+                if let data = item.data(forType: type) {
+                    typeDataMap[type] = data
+                }
+            }
+            return typeDataMap.isEmpty ? nil : SavedPasteboardItem(typeDataMap: typeDataMap)
+        }
+    }
+
+    /// 恢复剪贴板内容
+    private func restoreClipboard(pasteboard: NSPasteboard, items: [SavedPasteboardItem]) {
+        pasteboard.clearContents()
+
+        if items.isEmpty {
+            // 原来剪贴板是空的，清空即可
+            return
+        }
+
+        let newItems = items.map { saved -> NSPasteboardItem in
+            let item = NSPasteboardItem()
+            for (type, data) in saved.typeDataMap {
+                item.setData(data, forType: type)
+            }
+            return item
+        }
+
+        pasteboard.writeObjects(newItems)
+    }
+
+    // MARK: - CGEvent Simulate Cmd+V
+
+    /// 模拟 Cmd+V 按键
+    /// keyCode 0x09 = 'v' on US keyboard
+    private func postCmdV() -> Bool {
+        let vKeyCode: CGKeyCode = 0x09
+
+        guard let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: vKeyCode, keyDown: true),
+              let keyUp   = CGEvent(keyboardEventSource: nil, virtualKey: vKeyCode, keyDown: false)
+        else {
+            fputs("[TextInjector] CGEvent 创建失败\n", stderr)
+            return false
+        }
+
+        keyDown.flags = .maskCommand
+        keyUp.flags   = .maskCommand
+
+        keyDown.post(tap: .cghidEventTap)
+
+        // 短暂等待确保 keyDown 先被处理
+        Thread.sleep(forTimeInterval: Double(pasteDelayMs) / 1000.0)
+
+        keyUp.post(tap: .cghidEventTap)
+
+        return true
+    }
+
+    // MARK: - Accessibility 方案
+
+    /// 通过 AXUIElement 直接向焦点元素写入文本
+    private func injectViaAccessibility(text: String) -> Bool {
+        guard AXIsProcessTrusted() else {
+            fputs("[TextInjector] 辅助功能权限未授予\n", stderr)
+            return false
+        }
+
+        let systemWide = AXUIElementCreateSystemWide()
+
+        // 获取当前焦点 UI 元素
+        var focusedElement: AnyObject?
+        let result = AXUIElementCopyAttributeValue(
+            systemWide,
+            kAXFocusedUIElementAttribute as CFString,
+            &focusedElement
+        )
+
+        guard result == .success, let element = focusedElement else {
+            fputs("[TextInjector] 无法获取焦点元素：\(result.rawValue)\n", stderr)
+            return false
+        }
+
+        let axElement = element as! AXUIElement  // swiftlint:disable:this force_cast
+
+        // 尝试设置 value 属性
+        let setValue = AXUIElementSetAttributeValue(
+            axElement,
+            kAXValueAttribute as CFString,
+            text as CFTypeRef
+        )
+
+        if setValue == .success {
+            fputs("[TextInjector] ✅ Accessibility 注入成功\n", stderr)
+            return true
+        }
+
+        // 若不支持直接设置值，尝试插入文本（部分 app 支持）
+        let insertResult = AXUIElementSetAttributeValue(
+            axElement,
+            kAXSelectedTextAttribute as CFString,
+            text as CFTypeRef
+        )
+
+        if insertResult == .success {
+            fputs("[TextInjector] ✅ Accessibility 插入文本成功\n", stderr)
+            return true
+        }
+
+        fputs("[TextInjector] Accessibility 注入失败：value=\(setValue.rawValue), selectedText=\(insertResult.rawValue)\n", stderr)
+        return false
+    }
+}
+
+// MARK: - Helper Types
+
+/// 保存的剪贴板条目（含所有数据类型）
+private struct SavedPasteboardItem {
+    let typeDataMap: [NSPasteboard.PasteboardType: Data]
+}

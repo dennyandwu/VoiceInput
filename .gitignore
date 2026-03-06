@@ -1,0 +1,23 @@
+# Build artifacts
+/VoiceInput
+/dist/
+
+# sherpa-onnx libs (downloaded separately)
+sherpa-onnx-v*/
+sherpa-onnx-osx.tar.bz2
+
+# Models (too large for git, download separately)
+Resources/models/sense-voice/model.onnx
+Resources/models/sense-voice/model.int8.onnx
+Resources/models/silero-vad/silero_vad.onnx
+
+# macOS
+.DS_Store
+*.dSYM/
+
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+build/
+DerivedData/
+Resources/models/sense-voice
