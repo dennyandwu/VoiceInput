@@ -62,6 +62,50 @@ open /Applications/VoiceInput.app
 | 🎤 麦克风 | 录音 | ✅ |
 | ♿ 辅助功能 | 全局快捷键 + 文字输入 | ✅ |
 
+## 模型
+
+VoiceInput 使用以下开源模型：
+
+### SenseVoice-Small（语音识别）
+
+- **来源**: [FunAudioLLM/SenseVoice](https://github.com/FunAudioLLM/SenseVoice) — 阿里达摩院开源
+- **能力**: 中/英/日/韩/粤语自动检测，支持情感识别和音频事件检测
+- **许可**: Apache 2.0
+- **预转换 ONNX 模型**: [sherpa-onnx SenseVoice 模型](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models)
+
+| 模型 | 文件 | 大小 | 速度 | 精度 |
+|------|------|------|------|------|
+| **int8（默认）** | `model.int8.onnx` | 228MB | ⚡ 更快 | 与 float32 差异 <1% |
+| **float32** | `model.onnx` | 894MB | 正常 | 最高精度 |
+
+#### 切换到 float32 模型
+
+int8 模型已内置。如需使用 float32 精度模型：
+
+1. 下载模型文件：
+```bash
+# 从 sherpa-onnx 模型仓库下载（约 894MB）
+curl -L -o model.onnx "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2"
+
+# 解压后取出 model.onnx
+tar xf sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2
+cp sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/model.onnx .
+```
+
+2. 放入 app 资源目录：
+```bash
+cp model.onnx /Applications/VoiceInput.app/Contents/Resources/models/sense-voice/model.onnx
+```
+
+3. 在菜单栏右键 → 选择「float32（精准）」
+
+### Silero VAD（语音活动检测）
+
+- **来源**: [snakers4/silero-vad](https://github.com/snakers4/silero-vad)
+- **能力**: 实时检测语音起止，过滤静音和噪音
+- **许可**: MIT
+- **已内置**: `silero_vad.onnx`（629KB）
+
 ## 使用方法
 
 ### 基本操作
