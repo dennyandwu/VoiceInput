@@ -18,13 +18,14 @@ class TextInjector {
     // MARK: - Types
 
     enum Method {
-        case clipboard     // Pasteboard + Cmd+V（兼容性最好）
+        case keyboard      // CGEventKeyboardSetUnicodeString（推荐，不污染剪贴板）
+        case clipboard     // Pasteboard + Cmd+V（兼容性好）
         case accessibility // AXUIElement（部分 app 可用）
     }
 
     // MARK: - Properties
 
-    var method: Method = .clipboard
+    var method: Method = .keyboard
 
     /// Cmd+V 发送后等待应用处理的延迟（ms）
     var pasteDelayMs: Int = 100
@@ -42,6 +43,13 @@ class TextInjector {
         guard !text.isEmpty else { return true }
 
         switch method {
+        case .keyboard:
+            let success = injectViaKeyboardSimulation(text: text)
+            if !success {
+                fputs("[TextInjector] Keyboard 注入失败，降级到 clipboard\n", stderr)
+                return injectViaClipboard(text: text)
+            }
+            return true
         case .clipboard:
             return injectViaClipboard(text: text)
         case .accessibility:
@@ -73,7 +81,10 @@ class TextInjector {
         pasteboard.setString(text, forType: .string)
         fputs("[TextInjector] 写入识别文本到剪贴板\n", stderr)
 
-        // 3. 模拟 Cmd+V
+        // 3. 短暂等待确保剪贴板就绪
+        Thread.sleep(forTimeInterval: 0.05)
+
+        // 4. 模拟 Cmd+V
         let didPost = postCmdV()
         if !didPost {
             fputs("[TextInjector] ⚠️  Cmd+V 发送失败\n", stderr)
@@ -81,7 +92,7 @@ class TextInjector {
             fputs("[TextInjector] ✅ Cmd+V 已发送\n", stderr)
         }
 
-        // 4. 延迟恢复剪贴板（给目标应用时间处理粘贴）
+        // 5. 延迟恢复剪贴板（给目标应用时间处理粘贴）
         let restoreMs = restoreDelayMs
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(restoreMs)) { [weak self] in
             self?.restoreClipboard(pasteboard: pasteboard, items: savedItems)
@@ -89,6 +100,41 @@ class TextInjector {
         }
 
         return didPost
+    }
+
+    // MARK: - CGEvent Unicode 方案（推荐，不污染剪贴板）
+
+    /// 通过 CGEventKeyboardSetUnicodeString 直接模拟键入
+    /// 参考 open-typeless 的实现，每次最多 20 个 Unicode 字符
+    private func injectViaKeyboardSimulation(text: String) -> Bool {
+        fputs("[TextInjector] 使用 CGEvent Unicode 注入\n", stderr)
+
+        let utf16 = Array(text.utf16)
+        let chunkSize = 20  // CGEvent 限制每次最多 ~20 个 UTF-16 code unit
+
+        for start in stride(from: 0, to: utf16.count, by: chunkSize) {
+            let end = min(start + chunkSize, utf16.count)
+            let chunk = Array(utf16[start..<end])
+
+            guard let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
+                  let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) else {
+                fputs("[TextInjector] ❌ CGEvent 创建失败\n", stderr)
+                return false
+            }
+
+            var chars = chunk
+            keyDown.keyboardSetUnicodeString(stringLength: chars.count, unicodeString: &chars)
+            keyUp.keyboardSetUnicodeString(stringLength: chars.count, unicodeString: &chars)
+
+            keyDown.post(tap: .cghidEventTap)
+            keyUp.post(tap: .cghidEventTap)
+
+            // 短暂间隔避免事件丢失
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+
+        fputs("[TextInjector] ✅ Unicode 注入完成 (\(utf16.count) chars)\n", stderr)
+        return true
     }
 
     // MARK: - Clipboard Save / Restore

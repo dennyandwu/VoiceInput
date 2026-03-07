@@ -70,7 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setupTextInjector() {
         textInjector = TextInjector()
-        textInjector.method = .clipboard
+        textInjector.method = .keyboard  // CGEvent Unicode，不污染剪贴板
         textInjector.pasteDelayMs = 80
         textInjector.restoreDelayMs = 200
     }
@@ -320,18 +320,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let displayLang = langName.isEmpty ? "" : "[\(langName)] "
         recordingOverlay.setStatus("\(displayLang)\(finalText)")
 
-        // 延迟隐藏悬浮窗（让用户看到结果）
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
-            self?.recordingOverlay.hide()
-        }
-
         // 更新图标为完成状态
         statusBar.setState(.done, autoresetAfter: 1.0)
 
-        // 注入文本到当前焦点输入框
-        let injected = textInjector.inject(text: finalText)
-        if !injected {
-            fputs("[AppDelegate] ⚠️ 文本注入失败\n", stderr)
+        // 关键流程（参考 open-typeless）：
+        // 1. 先隐藏悬浮窗，让焦点回到原应用
+        // 2. 等待 100ms 让焦点切换完成
+        // 3. 再注入文本
+        recordingOverlay.hide()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            guard let self = self else { return }
+            let injected = self.textInjector.inject(text: finalText)
+            if !injected {
+                fputs("[AppDelegate] ⚠️ 文本注入失败\n", stderr)
+            }
         }
 
         // 发送系统通知（如果设置了）
