@@ -261,16 +261,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 更新悬浮窗状态
         recordingOverlay.setStatus("识别中...")
 
-        // 检查最短录音时长
-        let duration = recordStartTime.map { Date().timeIntervalSince($0) } ?? 0
-        if duration < minRecordDuration {
-            fputs("[AppDelegate] ⚠️ 录音太短 (\(String(format: "%.2f", duration))s < \(minRecordDuration)s)，已丢弃\n", stderr)
-            _ = p.stopListening()  // 丢弃结果
-            statusBar.setState(.idle)
-            recordingOverlay.hide()
-            return
-        }
-
         // 停止录音 + 识别在后台队列执行（避免阻塞主线程）
         pipelineQueue.async { [weak self] in
             guard let self = self else { return }

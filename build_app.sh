@@ -10,7 +10,7 @@ cd "$SCRIPT_DIR"
 
 # ─── 配置 ───────────────────────────────────────────────────────────────────
 APP_NAME="VoiceInput"
-APP_VERSION="1.0.3-beta"
+APP_VERSION="1.0.4-beta"
 BUNDLE_ID="com.urdao.voiceinput"
 
 SHERPA_DIR="$SCRIPT_DIR/sherpa-onnx-v1.12.28-osx-universal2-shared"
@@ -28,8 +28,8 @@ DMG_NAME="$APP_NAME-v$APP_VERSION-macos-arm64.dmg"
 DMG_PATH="$DIST_DIR/$DMG_NAME"
 
 # ─── 颜色输出 ────────────────────────────────────────────────────────────────
-RED='\1.0.3-beta;31m'; GREEN='\1.0.3-beta;32m'; YELLOW='\033[1;33m'
-BLUE='\1.0.3-beta;34m'; NC='\1.0.3-betam'
+RED='\1.0.4-beta;31m'; GREEN='\1.0.4-beta;32m'; YELLOW='\033[1;33m'
+BLUE='\1.0.4-beta;34m'; NC='\1.0.4-betam'
 info()    { echo -e "${BLUE}[INFO]${NC} $*"; }
 success() { echo -e "${GREEN}[✅]${NC} $*"; }
 warn()    { echo -e "${YELLOW}[WARN]${NC} $*"; }
@@ -203,7 +203,7 @@ cp "$SCRIPT_DIR/UNINSTALL.md" "$DMG_STAGING/"
 
 # 创建 README 文件
 cat > "$DMG_STAGING/README.md" << 'README_EOF'
-# VoiceInput v1.0.3-beta
+# VoiceInput v1.0.4-beta
 
 本地离线语音识别输入法，基于 SenseVoice + Sherpa-ONNX。
 

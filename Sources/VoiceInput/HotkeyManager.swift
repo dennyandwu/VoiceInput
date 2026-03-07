@@ -47,6 +47,13 @@ class HotkeyManager {
     /// PTT 模式下防止 keyDown 重复触发（长按会持续发 keyDown）
     private var pttActive = false
 
+    /// PTT 防抖：记录按下时间，松开时检查是否超过最短时长
+    private var pttPressTime: Date?
+    private let pttMinDuration: TimeInterval = 0.3  // 最短按住时长
+
+    /// PTT 防抖定时器：延迟处理松开事件
+    private var pttReleaseTimer: DispatchSourceTimer?
+
     // MARK: - Lifecycle
 
     deinit {
@@ -172,15 +179,39 @@ class HotkeyManager {
         switch mode {
         case .pushToTalk:
             if isPressed {
+                // 取消待执行的松开定时器
+                pttReleaseTimer?.cancel()
+                pttReleaseTimer = nil
+
                 guard !pttActive else { return true }
                 pttActive = true
+                pttPressTime = Date()
                 fputs("[HotkeyManager] PTT flagsChanged → 开始录音\n", stderr)
                 onRecordStart?()
             } else {
                 guard pttActive else { return true }
-                pttActive = false
-                fputs("[HotkeyManager] PTT flagsChanged → 停止录音\n", stderr)
-                onRecordStop?()
+
+                // 防抖：如果按住时间太短，延迟处理松开
+                let elapsed = pttPressTime.map { Date().timeIntervalSince($0) } ?? 0
+                if elapsed < pttMinDuration {
+                    // 设置延迟定时器
+                    let remaining = pttMinDuration - elapsed
+                    let timer = DispatchSource.makeTimerSource(queue: .main)
+                    timer.schedule(deadline: .now() + remaining)
+                    timer.setEventHandler { [weak self] in
+                        guard let self = self, self.pttActive else { return }
+                        // 再次检查按键状态（可能用户又按下了）
+                        self.pttActive = false
+                        fputs("[HotkeyManager] PTT 防抖延迟 → 停止录音 (held \(String(format: "%.2f", elapsed + remaining))s)\n", stderr)
+                        self.onRecordStop?()
+                    }
+                    timer.resume()
+                    pttReleaseTimer = timer
+                } else {
+                    pttActive = false
+                    fputs("[HotkeyManager] PTT flagsChanged → 停止录音 (held \(String(format: "%.2f", elapsed))s)\n", stderr)
+                    onRecordStop?()
+                }
             }
         case .toggle:
             if isPressed {
