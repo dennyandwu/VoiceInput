@@ -151,6 +151,19 @@ class RecognitionPipeline {
 
         let fullAudio = recorder.stopRecording()
         isListening = false
+
+        fputs("[Pipeline] 录音结束，总样本: \(fullAudio.count) (\(String(format: "%.2f", Double(fullAudio.count) / 16000.0))s)\n", stderr)
+
+        // 检查音频是否有效（非全零）
+        if !fullAudio.isEmpty {
+            let maxAmp = fullAudio.map { abs($0) }.max() ?? 0
+            let rms = sqrt(fullAudio.map { $0 * $0 }.reduce(0, +) / Float(fullAudio.count))
+            fputs("[Pipeline] 音频统计: maxAmp=\(String(format: "%.4f", maxAmp)), RMS=\(String(format: "%.4f", rms))\n", stderr)
+            if maxAmp < 0.001 {
+                fputs("[Pipeline] ⚠️ 音频几乎静音！检查麦克风是否正常\n", stderr)
+            }
+        }
+
         recorder.onAudioBuffer = nil
 
         // 获取要识别的音频
@@ -168,7 +181,7 @@ class RecognitionPipeline {
             vadLock.unlock()
 
             if segments.isEmpty {
-                fputs("[Pipeline] VAD 未检测到语音，使用完整录音\n", stderr)
+                fputs("[Pipeline] VAD 未检测到语音段，使用完整录音进行识别\n", stderr)
                 audioToRecognize = fullAudio
             } else {
                 // 拼接所有语音段

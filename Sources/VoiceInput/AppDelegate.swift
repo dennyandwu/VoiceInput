@@ -23,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pipeline: RecognitionPipeline?
     private var textInjector: TextInjector!
     private var recordingOverlay: RecordingOverlayWindow!
+    private var hotkeyRecorder: HotkeyRecorderWindow?
     private let settings = SettingsManager.shared
 
     // MARK: - State
@@ -226,15 +227,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 显示录音悬浮窗
         recordingOverlay.show()
 
-        // 设置音频电平回调
-        p.recorder.onAudioBuffer = { [weak self] samples in
-            self?.feedAudioLevel(samples)
-        }
+        // 注意：不要在这里设置 onAudioBuffer，Pipeline.startListening() 会设置 VAD 回调
+        // 悬浮窗音频电平通过 Pipeline 的回调链获取
 
         if !p.startListening() {
             fputs("[AppDelegate] ❌ 无法启动录音\n", stderr)
             isRecording = false
             statusBar.setState(.idle)
+            recordingOverlay.hide()
+            return
+        }
+
+        // startListening() 之后，在 VAD 回调基础上叠加悬浮窗电平更新
+        let originalCallback = p.recorder.onAudioBuffer
+        p.recorder.onAudioBuffer = { [weak self] samples in
+            // 先调用 VAD 的原始回调
+            originalCallback?(samples)
+            // 再更新悬浮窗电平
+            self?.feedAudioLevel(samples)
         }
     }
 
@@ -277,25 +287,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleRecognitionResult(_ result: PipelineResult) {
         // 后处理：清理识别结果
-        let cleanedText = TextPostProcessor.clean(result.text)
-        let lang = result.lang.isEmpty ? TextPostProcessor.extractLanguage(result.text) : result.lang
+        let rawText = result.text
+        let cleanedText = TextPostProcessor.clean(rawText)
+        let lang = result.lang.isEmpty ? TextPostProcessor.extractLanguage(rawText) : result.lang
         let langName = TextPostProcessor.languageName(lang)
 
-        if cleanedText.isEmpty {
-            fputs("[AppDelegate] ℹ️ 识别结果为空或无意义（原文: \"\(result.text)\"）\n", stderr)
-            recordingOverlay.setStatus("未检测到有效语音")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
-                self?.recordingOverlay.hide()
+        // 优先用清理后文本，若清理后为空但原文有内容则用原文（去 token 后）
+        let finalText: String
+        if !cleanedText.isEmpty {
+            finalText = cleanedText
+        } else {
+            // 去掉 SenseVoice token 但保留原始内容
+            let stripped = rawText.replacingOccurrences(of: #"<\|[^|]+\|>"#, with: "", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if stripped.count > 1 {
+                finalText = stripped
+                fputs("[AppDelegate] ℹ️ PostProcessor 过滤了原文，降级使用去 token 文本: \"\(stripped)\"\n", stderr)
+            } else {
+                fputs("[AppDelegate] ℹ️ 识别结果为空或无意义（原文: \"\(rawText)\"）\n", stderr)
+                recordingOverlay.setStatus("未检测到有效语音")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                    self?.recordingOverlay.hide()
+                }
+                statusBar.setState(.idle)
+                return
             }
-            statusBar.setState(.idle)
-            return
         }
 
-        fputs("[AppDelegate] ✅ 识别结果: \"\(cleanedText)\" [lang=\(lang), RTF=\(String(format: "%.3f", result.processingTime / max(result.duration, 0.001)))]\n", stderr)
+        fputs("[AppDelegate] ✅ 识别结果: \"\(finalText)\" [lang=\(lang), RTF=\(String(format: "%.3f", result.processingTime / max(result.duration, 0.001)))]\n", stderr)
 
         // 更新悬浮窗显示结果
         let displayLang = langName.isEmpty ? "" : "[\(langName)] "
-        recordingOverlay.setStatus("\(displayLang)\(cleanedText)")
+        recordingOverlay.setStatus("\(displayLang)\(finalText)")
 
         // 延迟隐藏悬浮窗（让用户看到结果）
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
@@ -306,14 +329,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusBar.setState(.done, autoresetAfter: 1.0)
 
         // 注入文本到当前焦点输入框
-        let injected = textInjector.inject(text: cleanedText)
+        let injected = textInjector.inject(text: finalText)
         if !injected {
             fputs("[AppDelegate] ⚠️ 文本注入失败\n", stderr)
         }
 
         // 发送系统通知（如果设置了）
         if settings.showNotification {
-            sendNotification(text: cleanedText, lang: lang)
+            sendNotification(text: finalText, lang: lang)
         }
     }
 
@@ -373,6 +396,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showHotkeyRecorder() {
         let recorder = HotkeyRecorderWindow()
+        self.hotkeyRecorder = recorder  // 防止 ARC 释放
         recorder.onKeyRecorded = { [weak self] keyCode, name in
             guard let self = self else { return }
             fputs("[AppDelegate] 新热键: keyCode=0x\(String(keyCode, radix: 16)) (\(name))\n", stderr)
@@ -386,6 +410,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.hotkeyManager.start()
 
             fputs("[AppDelegate] 热键已更新为: \(name)\n", stderr)
+            self.hotkeyRecorder = nil  // 释放
         }
         recorder.show()
     }
