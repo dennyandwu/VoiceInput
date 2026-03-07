@@ -94,8 +94,14 @@ final class UpdateChecker {
 
     /// 比较版本号：是否有新版本
     static func isNewerVersion(_ remote: String, than local: String) -> Bool {
-        let r = remote.split(separator: ".").compactMap { Int($0) }
-        let l = local.split(separator: ".").compactMap { Int($0) }
+        // 去掉 pre-release 后缀（-beta, -alpha, -rc.1 等）再比较数字部分
+        func numericParts(_ v: String) -> [Int] {
+            let base = v.split(separator: "-").first ?? Substring(v)
+            return base.split(separator: ".").compactMap { Int($0) }
+        }
+
+        let r = numericParts(remote)
+        let l = numericParts(local)
 
         for i in 0..<max(r.count, l.count) {
             let rv = i < r.count ? r[i] : 0
