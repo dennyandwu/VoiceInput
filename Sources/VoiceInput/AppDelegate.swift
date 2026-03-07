@@ -41,6 +41,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - NSApplicationDelegate
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // 初始化用户数据目录
+        SettingsManager.ensureAppSupportDir()
+
         // 不在 Dock 显示图标
         NSApp.setActivationPolicy(.accessory)
 
@@ -494,6 +497,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private static let float32ModelSize: Int64 = 894_000_000  // ~894MB
 
     private func downloadFloat32Model(to destPath: String) {
+        // 下载到用户数据目录，不放 app bundle 内
+        let actualDest = (SettingsManager.userModelDir as NSString).appendingPathComponent("model.onnx")
+        SettingsManager.ensureAppSupportDir()
         let alert = NSAlert()
         alert.messageText = "下载 float32 模型"
         alert.informativeText = """
@@ -512,7 +518,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         fputs("[AppDelegate] 开始下载 float32 模型...\n", stderr)
 
-        let modelDir = (destPath as NSString).deletingLastPathComponent
+        let modelDir = SettingsManager.userModelDir
 
         // 确保目录存在
         try? FileManager.default.createDirectory(atPath: modelDir, withIntermediateDirectories: true)
@@ -561,9 +567,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
                             if size > 500_000_000 {  // 应该 >500MB
                                 do {
-                                    try? fm.removeItem(atPath: destPath)
-                                    try fm.copyItem(atPath: fileURL.path, toPath: destPath)
-                                    fputs("[AppDelegate] ✅ float32 模型已安装: \(destPath) (\(size / 1024 / 1024)MB)\n", stderr)
+                                    try? fm.removeItem(atPath: actualDest)
+                                    try fm.copyItem(atPath: fileURL.path, toPath: actualDest)
+                                    fputs("[AppDelegate] ✅ float32 模型已安装: \(actualDest) (\(size / 1024 / 1024)MB)\n", stderr)
 
                                     // 切换到 float32 并重新加载
                                     self?.settings.modelType = "float32"

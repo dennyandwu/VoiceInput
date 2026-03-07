@@ -248,6 +248,31 @@ final class SettingsManager {
         set { defaults.set(newValue, forKey: Keys.showNotification) }
     }
 
+    // MARK: - 用户数据目录
+
+    /// 用户数据目录：~/Library/Application Support/VoiceInput/
+    /// 用于存放用户下载的模型等，不随 app 更新被覆盖
+    static var appSupportDir: String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return "\(home)/Library/Application Support/VoiceInput"
+    }
+
+    /// 用户模型目录：~/Library/Application Support/VoiceInput/models/sense-voice/
+    static var userModelDir: String {
+        return "\(appSupportDir)/models/sense-voice"
+    }
+
+    /// 确保用户数据目录存在
+    static func ensureAppSupportDir() {
+        let fm = FileManager.default
+        let dirs = [appSupportDir, userModelDir]
+        for dir in dirs {
+            if !fm.fileExists(atPath: dir) {
+                try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
+            }
+        }
+    }
+
     // MARK: - 模型路径解析
 
     /// 根据 modelType 返回对应的模型文件名
@@ -255,50 +280,79 @@ final class SettingsManager {
         modelType == "float32" ? "model.onnx" : "model.int8.onnx"
     }
 
-    /// 根据二进制位置推算 models 目录路径
+    /// 解析模型文件路径
+    /// 查找顺序：
+    /// 1. ~/Library/Application Support/VoiceInput/models/sense-voice/ （用户数据，不随更新丢失）
+    /// 2. .app bundle/Contents/Resources/models/sense-voice/ （随 app 分发）
+    /// 3. 开发环境 fallback 路径
+    func resolveModelPath() -> String {
+        let fileName = modelFileName
+
+        // 1. 用户数据目录（float32 模型下载到这里）
+        let userPath = (Self.userModelDir as NSString).appendingPathComponent(fileName)
+        if FileManager.default.fileExists(atPath: userPath) {
+            fputs("[Settings] 模型路径（用户目录）: \(userPath)\n", stderr)
+            return userPath
+        }
+
+        // 2. App bundle
+        if let resourcePath = Bundle.main.resourcePath {
+            let bundlePath = ((resourcePath as NSString).appendingPathComponent("models/sense-voice") as NSString).appendingPathComponent(fileName)
+            if FileManager.default.fileExists(atPath: bundlePath) {
+                return bundlePath
+            }
+        }
+
+        // 3. 开发环境 fallback
+        let binaryDir = (CommandLine.arguments[0] as NSString).deletingLastPathComponent
+        let relPath = ((binaryDir as NSString).appendingPathComponent("Resources/models/sense-voice") as NSString).appendingPathComponent(fileName)
+        if FileManager.default.fileExists(atPath: relPath) {
+            return relPath
+        }
+
+        // 最终 fallback
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return "\(home)/.openclaw/workspace-satoshi/VoiceInput/Resources/models/sense-voice/\(fileName)"
+    }
+
+    /// 返回模型目录（用于显示和诊断）
     func resolveModelDir() -> String {
-        // 优先检查 .app bundle 内的 Resources
+        // 优先 bundle
         if let resourcePath = Bundle.main.resourcePath {
             let bundlePath = (resourcePath as NSString).appendingPathComponent("models/sense-voice")
             if FileManager.default.fileExists(atPath: bundlePath) {
                 return bundlePath
             }
         }
-        let binaryPath = CommandLine.arguments[0]
-        let binaryDir = (binaryPath as NSString).deletingLastPathComponent
-        // 尝试相对路径：<binary_dir>/Resources/models/sense-voice
-        let relPath = (binaryDir as NSString)
-            .appendingPathComponent("Resources/models/sense-voice")
+        let binaryDir = (CommandLine.arguments[0] as NSString).deletingLastPathComponent
+        let relPath = (binaryDir as NSString).appendingPathComponent("Resources/models/sense-voice")
         if FileManager.default.fileExists(atPath: relPath) {
             return relPath
         }
-        // 尝试上一级：适用于二进制在项目根目录的情况
-        let parentDir = (binaryDir as NSString).deletingLastPathComponent
-        let altPath = (parentDir as NSString)
-            .appendingPathComponent("VoiceInput/Resources/models/sense-voice")
-        if FileManager.default.fileExists(atPath: altPath) {
-            return altPath
-        }
-        // 最终 fallback：home 目录下的固定路径
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return "\(home)/.openclaw/workspace-satoshi/VoiceInput/Resources/models/sense-voice"
     }
 
-    /// 返回完整模型文件路径（model.onnx 或 model.int8.onnx）
-    func resolveModelPath() -> String {
-        let dir = resolveModelDir()
-        return (dir as NSString).appendingPathComponent(modelFileName)
-    }
-
-    /// 返回 tokens.txt 路径
+    /// 返回 tokens.txt 路径（优先用户目录，再 bundle）
     func resolveTokensPath() -> String {
+        let userPath = (Self.userModelDir as NSString).appendingPathComponent("tokens.txt")
+        if FileManager.default.fileExists(atPath: userPath) {
+            return userPath
+        }
+
+        if let resourcePath = Bundle.main.resourcePath {
+            let bundlePath = ((resourcePath as NSString).appendingPathComponent("models/sense-voice") as NSString).appendingPathComponent("tokens.txt")
+            if FileManager.default.fileExists(atPath: bundlePath) {
+                return bundlePath
+            }
+        }
+
         let dir = resolveModelDir()
         return (dir as NSString).appendingPathComponent("tokens.txt")
     }
 
     /// 返回 silero-vad 模型路径
     func resolveSileroModelPath() -> String {
-        // 优先检查 .app bundle 内的 Resources
         if let resourcePath = Bundle.main.resourcePath {
             let bundlePath = (resourcePath as NSString).appendingPathComponent("models/silero-vad/silero_vad.onnx")
             if FileManager.default.fileExists(atPath: bundlePath) {
@@ -306,8 +360,7 @@ final class SettingsManager {
             }
         }
         let binaryDir = (CommandLine.arguments[0] as NSString).deletingLastPathComponent
-        let relPath = (binaryDir as NSString)
-            .appendingPathComponent("Resources/models/silero-vad/silero_vad.onnx")
+        let relPath = (binaryDir as NSString).appendingPathComponent("Resources/models/silero-vad/silero_vad.onnx")
         if FileManager.default.fileExists(atPath: relPath) {
             return relPath
         }

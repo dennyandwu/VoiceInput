@@ -357,17 +357,17 @@ final class StatusBarController {
     }
 
     @objc private func selectModelFloat32() {
-        // 检查 float32 模型是否存在
-        let modelDir = settings.resolveModelDir()
-        let float32Path = (modelDir as NSString).appendingPathComponent("model.onnx")
+        // 检查 float32 模型是否存在（用户目录 或 bundle 内）
+        let userPath = (SettingsManager.userModelDir as NSString).appendingPathComponent("model.onnx")
+        let bundleDir = settings.resolveModelDir()
+        let bundlePath = (bundleDir as NSString).appendingPathComponent("model.onnx")
 
-        if FileManager.default.fileExists(atPath: float32Path) {
-            // 模型已存在，直接切换
+        if FileManager.default.fileExists(atPath: userPath) ||
+           FileManager.default.fileExists(atPath: bundlePath) {
             settings.modelType = "float32"
             onModelTypeChanged?("float32")
         } else {
-            // 模型不存在，提示下载
-            onFloat32ModelNeeded?(float32Path)
+            onFloat32ModelNeeded?(userPath)
         }
     }
 
