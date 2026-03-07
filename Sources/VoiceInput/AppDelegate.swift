@@ -98,6 +98,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.downloadFloat32Model(to: destPath)
         }
 
+        statusBar.onWhisperDownloadRequested = { [weak self] in
+            self?.downloadWhisperModel()
+        }
+
         statusBar.onQuit = {
             NSApp.terminate(nil)
         }
@@ -180,6 +184,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if newPipeline.modelLoaded {
                     self.pipeline = newPipeline
                     fputs("[AppDelegate] ✅ 模型加载成功 (\(self.settings.modelTypeName))\n", stderr)
+
+                    // 尝试加载 Whisper（英文增强，可选）
+                    self.tryLoadWhisper(engine: newPipeline.engine)
                 } else {
                     fputs("[AppDelegate] ❌ 模型加载失败！请检查模型文件路径\n", stderr)
                     self.showAlert(
@@ -488,6 +495,121 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.showAlert(title: "更新失败", message: msg)
             }
         }
+    }
+
+    // MARK: - Whisper 英文增强引擎
+
+    /// Whisper small 模型下载 URL（sherpa-onnx 预转换）
+    private static let whisperModelURL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-small.en.tar.bz2"
+
+    /// 尝试加载 Whisper 模型（如果已下载）
+    private func tryLoadWhisper(engine: SpeechEngine) {
+        let whisperDir = SettingsManager.whisperModelDir
+        let encoderPath = (whisperDir as NSString).appendingPathComponent("small.en-encoder.int8.onnx")
+        let decoderPath = (whisperDir as NSString).appendingPathComponent("small.en-decoder.int8.onnx")
+        let tokensPath = (whisperDir as NSString).appendingPathComponent("small.en-tokens.txt")
+
+        guard FileManager.default.fileExists(atPath: encoderPath) else {
+            fputs("[AppDelegate] Whisper 模型未安装（菜单可下载）\n", stderr)
+            return
+        }
+
+        pipelineQueue.async {
+            let success = engine.loadWhisper(encoderPath: encoderPath, decoderPath: decoderPath, tokensPath: tokensPath)
+            if success {
+                fputs("[AppDelegate] ✅ Whisper 英文增强已启用\n", stderr)
+            }
+        }
+    }
+
+    /// 下载 Whisper 模型
+    private func downloadWhisperModel() {
+        let alert = NSAlert()
+        alert.messageText = "下载 Whisper 英文增强模型"
+        alert.informativeText = """
+        Whisper Small（英文专用，约 200MB）可大幅提升英文识别准确率。
+
+        安装后，纯英文语音会自动使用 Whisper 识别。
+        中文和中英混合语句仍使用 SenseVoice。
+
+        是否下载？
+        """
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "下载")
+        alert.addButton(withTitle: "取消")
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        fputs("[AppDelegate] 开始下载 Whisper 模型...\n", stderr)
+        SettingsManager.ensureAppSupportDir()
+
+        guard let url = URL(string: Self.whisperModelURL) else { return }
+
+        let task = URLSession.shared.downloadTask(with: url) { [weak self] tempURL, response, error in
+            DispatchQueue.main.async {
+                if let error = error {
+                    fputs("[AppDelegate] ❌ Whisper 下载失败: \(error.localizedDescription)\n", stderr)
+                    self?.showAlert(title: "下载失败", message: error.localizedDescription)
+                    return
+                }
+
+                guard let tempURL = tempURL else {
+                    self?.showAlert(title: "下载失败", message: "临时文件为空")
+                    return
+                }
+
+                fputs("[AppDelegate] Whisper 下载完成，解压中...\n", stderr)
+
+                let extractDir = FileManager.default.temporaryDirectory.appendingPathComponent("whisper-extract")
+                try? FileManager.default.removeItem(at: extractDir)
+                try? FileManager.default.createDirectory(at: extractDir, withIntermediateDirectories: true)
+
+                let tarPath = extractDir.appendingPathComponent("whisper.tar.bz2")
+                try? FileManager.default.moveItem(at: tempURL, to: tarPath)
+
+                let tar = Process()
+                tar.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
+                tar.arguments = ["xjf", tarPath.path, "-C", extractDir.path]
+                try? tar.run()
+                tar.waitUntilExit()
+
+                // 查找 encoder 文件并复制所有模型文件到 whisper 目录
+                let fm = FileManager.default
+                let whisperDir = SettingsManager.whisperModelDir
+                var found = false
+
+                if let enumerator = fm.enumerator(at: extractDir, includingPropertiesForKeys: nil) {
+                    for case let fileURL as URL in enumerator {
+                        let name = fileURL.lastPathComponent
+                        // 复制所有 .onnx 和 tokens.txt 文件
+                        if name.hasSuffix(".onnx") || name.contains("tokens") {
+                            let destPath = (whisperDir as NSString).appendingPathComponent(name)
+                            try? fm.removeItem(atPath: destPath)
+                            try? fm.copyItem(atPath: fileURL.path, toPath: destPath)
+                            fputs("[AppDelegate] 复制: \(name)\n", stderr)
+                            if name.contains("encoder") { found = true }
+                        }
+                    }
+                }
+
+                try? fm.removeItem(at: extractDir)
+
+                if found {
+                    fputs("[AppDelegate] ✅ Whisper 模型已安装\n", stderr)
+                    // 立即加载
+                    if let pipeline = self?.pipeline {
+                        self?.tryLoadWhisper(engine: pipeline.engine)
+                    }
+                    self?.showAlert(title: "Whisper 已安装",
+                        message: "英文增强模型已安装。纯英文语音将自动使用 Whisper 识别。")
+                } else {
+                    self?.showAlert(title: "安装失败", message: "解压后未找到 Whisper 模型文件")
+                }
+            }
+        }
+
+        task.resume()
+        showAlert(title: "正在下载", message: "Whisper 英文增强模型（约 200MB）正在后台下载。\n完成后会自动安装并启用。")
     }
 
     // MARK: - Float32 模型下载

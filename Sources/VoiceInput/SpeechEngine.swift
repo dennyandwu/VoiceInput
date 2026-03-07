@@ -9,9 +9,11 @@ import AVFoundation
 /// 支持中英日韩粤五语混识
 class SpeechEngine {
     private var recognizer: SherpaOnnxOfflineRecognizer?
+    private var whisperRecognizer: SherpaOnnxOfflineRecognizer?
     private var modelPath: String = ""
     private var tokensPath: String = ""
     private var isLoaded: Bool = false
+    private var whisperLoaded: Bool = false
 
     // MARK: - 初始化
 
@@ -76,6 +78,100 @@ class SpeechEngine {
         fputs("[SpeechEngine] Model: \((modelPath as NSString).lastPathComponent)\n", stderr)
 
         return true
+    }
+
+    // MARK: - Whisper 模型加载
+
+    /// 加载 Whisper 模型（用于英文识别增强）
+    /// - Parameters:
+    ///   - encoderPath: whisper-encoder.onnx 路径
+    ///   - decoderPath: whisper-decoder.onnx 路径
+    ///   - tokensPath: tokens.txt 路径
+    ///   - numThreads: 推理线程数
+    /// - Returns: 是否加载成功
+    @discardableResult
+    func loadWhisper(encoderPath: String, decoderPath: String, tokensPath: String, numThreads: Int = 4) -> Bool {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: encoderPath) else {
+            fputs("[SpeechEngine] Whisper encoder not found: \(encoderPath)\n", stderr)
+            return false
+        }
+        guard fm.fileExists(atPath: decoderPath) else {
+            fputs("[SpeechEngine] Whisper decoder not found: \(decoderPath)\n", stderr)
+            return false
+        }
+        guard fm.fileExists(atPath: tokensPath) else {
+            fputs("[SpeechEngine] Whisper tokens not found: \(tokensPath)\n", stderr)
+            return false
+        }
+
+        let t0 = Date()
+
+        let whisperConfig = sherpaOnnxOfflineWhisperModelConfig(
+            encoder: encoderPath,
+            decoder: decoderPath,
+            language: "en",          // 强制英文
+            task: "transcribe"
+        )
+
+        let modelConfig = sherpaOnnxOfflineModelConfig(
+            tokens: tokensPath,
+            whisper: whisperConfig,
+            numThreads: numThreads,
+            provider: "cpu",
+            debug: 0
+        )
+
+        let featConfig = sherpaOnnxFeatureConfig(
+            sampleRate: 16000,
+            featureDim: 80
+        )
+
+        var config = sherpaOnnxOfflineRecognizerConfig(
+            featConfig: featConfig,
+            modelConfig: modelConfig
+        )
+
+        let rec = SherpaOnnxOfflineRecognizer(config: &config)
+        self.whisperRecognizer = rec
+        self.whisperLoaded = true
+
+        let elapsed = Date().timeIntervalSince(t0)
+        fputs("[SpeechEngine] Whisper loaded in \(String(format: "%.3f", elapsed))s\n", stderr)
+        fputs("[SpeechEngine] Whisper encoder: \((encoderPath as NSString).lastPathComponent)\n", stderr)
+
+        return true
+    }
+
+    /// Whisper 是否已加载
+    var hasWhisper: Bool { whisperLoaded }
+
+    /// 用 Whisper 识别英文音频
+    func recognizeWithWhisper(audioData: [Float], sampleRate: Int = 16000) -> RecognitionResult {
+        guard let rec = whisperRecognizer, whisperLoaded else {
+            fputs("[SpeechEngine] Whisper not loaded, falling back to SenseVoice\n", stderr)
+            return recognize(audioData: audioData, sampleRate: sampleRate)
+        }
+
+        guard !audioData.isEmpty else {
+            return RecognitionResult(text: "", lang: "en", emotion: "", event: "")
+        }
+
+        let t0 = Date()
+        let result = rec.decode(samples: audioData, sampleRate: sampleRate)
+        let elapsed = Date().timeIntervalSince(t0)
+
+        let duration = Double(audioData.count) / Double(sampleRate)
+        fputs("[SpeechEngine] Whisper recognized \(String(format: "%.2f", duration))s "
+            + "in \(String(format: "%.3f", elapsed))s (RTF=\(String(format: "%.3f", elapsed/duration)))\n",
+            stderr)
+
+        return RecognitionResult(
+            text: result.text,
+            lang: "en",
+            emotion: "",
+            event: ""
+        )
     }
 
     // MARK: - 识别接口

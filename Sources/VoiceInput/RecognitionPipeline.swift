@@ -305,16 +305,35 @@ class RecognitionPipeline {
 
         let duration = Double(audioData.count) / 16000.0
         let t0 = Date()
+
+        // 第一遍：SenseVoice（快速语言检测 + 中文识别）
         let result = engine.recognize(audioData: audioData, sampleRate: 16000)
+        let lang = TextPostProcessor.extractLanguage(result.text).isEmpty
+            ? result.lang
+            : TextPostProcessor.extractLanguage(result.text)
+
+        var finalResult = result
+
+        // 第二遍：如果检测到英文 + Whisper 已加载 → 用 Whisper 重新识别
+        if lang == "en" && engine.hasWhisper {
+            fputs("[Pipeline] 检测到英文，使用 Whisper 重新识别...\n", stderr)
+            let whisperResult = engine.recognizeWithWhisper(audioData: audioData, sampleRate: 16000)
+            if !whisperResult.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                fputs("[Pipeline] Whisper 结果: \"\(whisperResult.text)\"\n", stderr)
+                fputs("[Pipeline] SenseVoice 结果: \"\(result.text)\"（已替换）\n", stderr)
+                finalResult = whisperResult
+            }
+        }
+
         let elapsed = Date().timeIntervalSince(t0)
 
-        fputs("[Pipeline] 识别完成: \"\(result.text)\" (lang=\(result.lang), RTF=\(String(format: "%.3f", elapsed/max(duration, 0.001))))\n", stderr)
+        fputs("[Pipeline] 识别完成: \"\(finalResult.text)\" (lang=\(finalResult.lang), RTF=\(String(format: "%.3f", elapsed/max(duration, 0.001))))\n", stderr)
 
         return PipelineResult(
-            text: result.text,
-            lang: result.lang,
-            emotion: result.emotion,
-            event: result.event,
+            text: finalResult.text,
+            lang: finalResult.lang,
+            emotion: finalResult.emotion,
+            event: finalResult.event,
             audioSamples: audioData.count,
             duration: duration,
             processingTime: elapsed

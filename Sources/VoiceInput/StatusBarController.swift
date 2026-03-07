@@ -37,6 +37,7 @@ final class StatusBarController {
     /// 用户在菜单中切换模型类型（切换后需要重新加载引擎）
     var onModelTypeChanged: ((String) -> Void)?
     var onFloat32ModelNeeded: ((String) -> Void)?
+    var onWhisperDownloadRequested: (() -> Void)?
 
     /// 用户请求退出
     var onQuit: (() -> Void)?
@@ -269,6 +270,21 @@ final class StatusBarController {
         langItem.submenu = langMenu
         menu.addItem(langItem)
 
+        // ─── Whisper 英文增强 ──────────────────────────────
+        let whisperDir = SettingsManager.whisperModelDir
+        let whisperInstalled = FileManager.default.fileExists(
+            atPath: (whisperDir as NSString).appendingPathComponent("small.en-encoder.int8.onnx"))
+
+        if whisperInstalled {
+            let whisperItem = NSMenuItem(title: "✅ Whisper 英文增强已启用", action: nil, keyEquivalent: "")
+            whisperItem.isEnabled = false
+            menu.addItem(whisperItem)
+        } else {
+            let whisperItem = NSMenuItem(title: "⬇️ 下载 Whisper 英文增强", action: #selector(downloadWhisper), keyEquivalent: "")
+            whisperItem.target = self
+            menu.addItem(whisperItem)
+        }
+
         menu.addItem(.separator())
 
         // ─── 权限状态 ─────────────────────────────────────
@@ -354,6 +370,10 @@ final class StatusBarController {
         guard let mode = sender.representedObject as? String else { return }
         settings.languageMode = mode
         fputs("[StatusBar] 语言模式切换: \(mode) (\(settings.languageModeName))\n", stderr)
+    }
+
+    @objc private func downloadWhisper() {
+        onWhisperDownloadRequested?()
     }
 
     @objc private func selectModelFloat32() {

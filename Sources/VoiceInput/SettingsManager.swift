@@ -262,10 +262,15 @@ final class SettingsManager {
         return "\(appSupportDir)/models/sense-voice"
     }
 
+    /// Whisper 模型目录：~/Library/Application Support/VoiceInput/models/whisper/
+    static var whisperModelDir: String {
+        return "\(appSupportDir)/models/whisper"
+    }
+
     /// 确保用户数据目录存在
     static func ensureAppSupportDir() {
         let fm = FileManager.default
-        let dirs = [appSupportDir, userModelDir]
+        let dirs = [appSupportDir, userModelDir, whisperModelDir]
         for dir in dirs {
             if !fm.fileExists(atPath: dir) {
                 try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
