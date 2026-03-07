@@ -21,34 +21,18 @@ macOS 全局语音输入工具 — 按住快捷键说话，自动识别并输入
 
 ## 安装
 
-### 方式一：局域网下载（推荐，速度最快）
+### 下载
+
+从 [GitHub Releases](https://github.com/dennyandwu/VoiceInput/releases) 下载最新 DMG 文件。
+
+### 安装步骤
+
+1. 打开下载的 DMG 文件
+2. 将 VoiceInput.app 拖入 Applications 文件夹
+3. 首次启动需要解除 Gatekeeper 限制（未经 Apple 公证）：
 
 ```bash
-# 下载 DMG（替换为实际的局域网 IP 和版本号）
-curl -O http://<mac-mini-ip>:9999/VoiceInput-v1.0.5-beta-macos-arm64.dmg
-
-# 打开 DMG
-open VoiceInput-v1.0.5-beta-macos-arm64.dmg
-```
-
-将 VoiceInput.app 拖入 Applications 文件夹。
-
-### 方式二：GitHub Releases
-
-从 [Releases](https://github.com/dennyandwu/VoiceInput/releases) 下载最新 DMG。
-
-> ⚠️ GitHub 对大文件上传有限制，如果 DMG 大小明显不对（应约 187MB），请使用局域网方式下载。
-
-### 首次启动
-
-由于未经 Apple 公证，首次启动需要解除 Gatekeeper 限制：
-
-```bash
-# 解除隔离属性（每次重新安装后需要执行一次）
 sudo xattr -r -d com.apple.quarantine /Applications/VoiceInput.app
-
-# 启动应用
-open /Applications/VoiceInput.app
 ```
 
 或者：右键点击 VoiceInput.app → 选择「打开」→ 在弹窗中点击「打开」。
@@ -80,24 +64,7 @@ VoiceInput 使用以下开源模型：
 
 #### 切换到 float32 模型
 
-int8 模型已内置。如需使用 float32 精度模型：
-
-1. 下载模型文件：
-```bash
-# 从 sherpa-onnx 模型仓库下载（约 894MB）
-curl -L -o model.onnx "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2"
-
-# 解压后取出 model.onnx
-tar xf sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2
-cp sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/model.onnx .
-```
-
-2. 放入 app 资源目录：
-```bash
-cp model.onnx /Applications/VoiceInput.app/Contents/Resources/models/sense-voice/model.onnx
-```
-
-3. 在菜单栏右键 → 选择「float32（精准）」
+菜单栏右键 → 选择「float32（精准）」→ 如果模型未安装，会自动提示下载（894MB）。
 
 ### Silero VAD（语音活动检测）
 
