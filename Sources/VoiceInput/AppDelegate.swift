@@ -91,6 +91,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.loadPipelineAsync()
         }
 
+        statusBar.onFloat32ModelNeeded = { [weak self] destPath in
+            self?.downloadFloat32Model(to: destPath)
+        }
+
         statusBar.onQuit = {
             NSApp.terminate(nil)
         }
@@ -476,5 +480,113 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.showAlert(title: "更新失败", message: msg)
             }
         }
+    }
+
+    // MARK: - Float32 模型下载
+
+    /// sherpa-onnx SenseVoice float32 模型下载 URL
+    private static let float32ModelURL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2"
+    private static let float32ModelSize: Int64 = 894_000_000  // ~894MB
+
+    private func downloadFloat32Model(to destPath: String) {
+        let alert = NSAlert()
+        alert.messageText = "下载 float32 模型"
+        alert.informativeText = """
+        float32 模型（894MB）尚未安装。
+
+        float32 精度更高，但体积更大、速度稍慢。
+        int8 模型精度损失 <1%，推荐日常使用。
+
+        是否下载 float32 模型？
+        """
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "下载")
+        alert.addButton(withTitle: "取消")
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        fputs("[AppDelegate] 开始下载 float32 模型...\n", stderr)
+
+        let modelDir = (destPath as NSString).deletingLastPathComponent
+
+        // 确保目录存在
+        try? FileManager.default.createDirectory(atPath: modelDir, withIntermediateDirectories: true)
+
+        guard let url = URL(string: Self.float32ModelURL) else { return }
+
+        let task = URLSession.shared.downloadTask(with: url) { [weak self] tempURL, response, error in
+            DispatchQueue.main.async {
+                if let error = error {
+                    fputs("[AppDelegate] ❌ float32 下载失败: \(error.localizedDescription)\n", stderr)
+                    self?.showAlert(title: "下载失败", message: error.localizedDescription)
+                    return
+                }
+
+                guard let tempURL = tempURL else {
+                    self?.showAlert(title: "下载失败", message: "临时文件为空")
+                    return
+                }
+
+                // 解压 tar.bz2 → 提取 model.onnx
+                fputs("[AppDelegate] 下载完成，解压中...\n", stderr)
+
+                let extractDir = FileManager.default.temporaryDirectory.appendingPathComponent("float32-extract")
+                try? FileManager.default.removeItem(at: extractDir)
+                try? FileManager.default.createDirectory(at: extractDir, withIntermediateDirectories: true)
+
+                // 先移动到 .tar.bz2 文件
+                let tarPath = extractDir.appendingPathComponent("model.tar.bz2")
+                try? FileManager.default.moveItem(at: tempURL, to: tarPath)
+
+                // 解压
+                let tar = Process()
+                tar.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
+                tar.arguments = ["xjf", tarPath.path, "-C", extractDir.path]
+                tar.currentDirectoryURL = extractDir
+                try? tar.run()
+                tar.waitUntilExit()
+
+                // 查找 model.onnx
+                let fm = FileManager.default
+                if let enumerator = fm.enumerator(at: extractDir, includingPropertiesForKeys: nil) {
+                    for case let fileURL as URL in enumerator {
+                        if fileURL.lastPathComponent == "model.onnx" {
+                            let attrs = try? fm.attributesOfItem(atPath: fileURL.path)
+                            let size = (attrs?[.size] as? Int64) ?? 0
+
+                            if size > 500_000_000 {  // 应该 >500MB
+                                do {
+                                    try? fm.removeItem(atPath: destPath)
+                                    try fm.copyItem(atPath: fileURL.path, toPath: destPath)
+                                    fputs("[AppDelegate] ✅ float32 模型已安装: \(destPath) (\(size / 1024 / 1024)MB)\n", stderr)
+
+                                    // 切换到 float32 并重新加载
+                                    self?.settings.modelType = "float32"
+                                    self?.loadPipelineAsync()
+
+                                    self?.showAlert(title: "模型下载完成",
+                                        message: "float32 模型已安装（\(size / 1024 / 1024)MB），已自动切换。")
+                                } catch {
+                                    fputs("[AppDelegate] ❌ 复制 model.onnx 失败: \(error)\n", stderr)
+                                    self?.showAlert(title: "安装失败", message: error.localizedDescription)
+                                }
+                            } else {
+                                self?.showAlert(title: "安装失败", message: "model.onnx 文件异常（\(size) bytes）")
+                            }
+
+                            // 清理
+                            try? fm.removeItem(at: extractDir)
+                            return
+                        }
+                    }
+                }
+
+                self?.showAlert(title: "安装失败", message: "解压后未找到 model.onnx")
+                try? fm.removeItem(at: extractDir)
+            }
+        }
+
+        task.resume()
+        showAlert(title: "正在下载", message: "float32 模型（894MB）正在后台下载，完成后会自动安装并切换。\n\n下载过程中可以继续使用 int8 模型。")
     }
 }

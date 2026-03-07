@@ -36,6 +36,7 @@ final class StatusBarController {
 
     /// 用户在菜单中切换模型类型（切换后需要重新加载引擎）
     var onModelTypeChanged: ((String) -> Void)?
+    var onFloat32ModelNeeded: ((String) -> Void)?
 
     /// 用户请求退出
     var onQuit: (() -> Void)?
@@ -328,8 +329,18 @@ final class StatusBarController {
     }
 
     @objc private func selectModelFloat32() {
-        settings.modelType = "float32"
-        onModelTypeChanged?("float32")
+        // 检查 float32 模型是否存在
+        let modelDir = settings.resolveModelDir()
+        let float32Path = (modelDir as NSString).appendingPathComponent("model.onnx")
+
+        if FileManager.default.fileExists(atPath: float32Path) {
+            // 模型已存在，直接切换
+            settings.modelType = "float32"
+            onModelTypeChanged?("float32")
+        } else {
+            // 模型不存在，提示下载
+            onFloat32ModelNeeded?(float32Path)
+        }
     }
 
     @objc private func requestMicPermission() {
