@@ -90,28 +90,44 @@ struct TextPostProcessor {
             return (text, detectedLang)
         }
 
-        // 日语误判处理：如果白名单包含中文，日语结果很可能是中文
-        // 因为日语和中文共享大量汉字
+        // 检查文本是否包含日文假名（平假名/片假名）
+        // 如果包含，说明模型真的输出了日语，不是中文被误标
+        let hasJapaneseKana = text.unicodeScalars.contains { scalar in
+            // 平假名 U+3040-U+309F, 片假名 U+30A0-U+30FF
+            (0x3040...0x309F).contains(scalar.value) ||
+            (0x30A0...0x30FF).contains(scalar.value)
+        }
+
+        if hasJapaneseKana && !allowed.contains("ja") {
+            fputs("[PostProcessor] 检测到日文假名字符，结果无效，丢弃\n", stderr)
+            return ("", detectedLang)
+        }
+
+        // 日语误判处理：文本是汉字（中日共享），重映射为中文
         if detectedLang == "ja" && allowed.contains("zh") {
-            fputs("[PostProcessor] 语言重映射: ja → zh（白名单不含日语）\n", stderr)
+            fputs("[PostProcessor] 语言重映射: ja → zh（纯汉字内容）\n", stderr)
             return (text, "zh")
         }
 
-        // 粤语误判处理：如果白名单包含中文，粤语结果映射为中文
+        // 粤语误判处理
         if detectedLang == "yue" && allowed.contains("zh") {
-            fputs("[PostProcessor] 语言重映射: yue → zh（白名单不含粤语）\n", stderr)
+            fputs("[PostProcessor] 语言重映射: yue → zh\n", stderr)
             return (text, "zh")
         }
 
-        // 韩语误判处理：如果白名单包含中文或英文，丢弃
+        // 韩语误判处理
         if detectedLang == "ko" && !allowed.contains("ko") {
-            fputs("[PostProcessor] 语言过滤: ko 不在白名单，文本可能误判\n", stderr)
-            // 韩语和中英差异大，不好重映射，但仍然返回（用户可能确实说了类似的音）
+            // 检查是否包含韩文字符
+            let hasKorean = text.unicodeScalars.contains { (0xAC00...0xD7AF).contains($0.value) }
+            if hasKorean {
+                fputs("[PostProcessor] 检测到韩文字符，结果无效，丢弃\n", stderr)
+                return ("", detectedLang)
+            }
             let fallback = allowed.contains("zh") ? "zh" : (allowed.first ?? "en")
             return (text, fallback)
         }
 
-        // 其他情况：映射到白名单中第一个语言
+        // 其他情况
         let fallback = allowed.contains("zh") ? "zh" : (allowed.first ?? "en")
         fputs("[PostProcessor] 语言重映射: \(detectedLang) → \(fallback)\n", stderr)
         return (text, fallback)
