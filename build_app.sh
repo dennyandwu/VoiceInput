@@ -28,8 +28,8 @@ DMG_NAME="$APP_NAME-v$APP_VERSION-macos-arm64.dmg"
 DMG_PATH="$DIST_DIR/$DMG_NAME"
 
 # ─── 颜色输出 ────────────────────────────────────────────────────────────────
-RED='\1.1.1-beta;31m'; GREEN='\1.1.1-beta;32m'; YELLOW='\033[1;33m'
-BLUE='\1.1.1-beta;34m'; NC='\1.1.1-betam'
+RED='\2.0.0;31m'; GREEN='\2.0.0;32m'; YELLOW='\033[1;33m'
+BLUE='\2.0.0;34m'; NC='\2.0.0m'
 info()    { echo -e "${BLUE}[INFO]${NC} $*"; }
 success() { echo -e "${GREEN}[✅]${NC} $*"; }
 warn()    { echo -e "${YELLOW}[WARN]${NC} $*"; }
@@ -203,7 +203,7 @@ cp "$SCRIPT_DIR/UNINSTALL.md" "$DMG_STAGING/"
 
 # 创建 README 文件
 cat > "$DMG_STAGING/README.md" << 'README_EOF'
-# VoiceInput v1.1.1-beta
+# VoiceInput v2.0.0
 
 本地离线语音识别输入法，基于 SenseVoice + Sherpa-ONNX。
 
