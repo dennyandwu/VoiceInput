@@ -441,53 +441,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showUpdateAlert(release: UpdateChecker.ReleaseInfo) {
+        let sizeStr = release.dmgSize > 0 ? "\(release.dmgSize / 1024 / 1024)MB" : "未知大小"
+
         let alert = NSAlert()
         alert.messageText = "发现新版本 \(release.tagName)"
         alert.informativeText = """
         当前版本: v\(UpdateChecker.currentVersion)
         最新版本: \(release.tagName)
+        下载大小: \(sizeStr)
 
         更新内容:
         \(release.body.prefix(500))
         """
         alert.alertStyle = .informational
-        alert.addButton(withTitle: "下载更新")
+        alert.addButton(withTitle: "自动更新")
         alert.addButton(withTitle: "稍后再说")
-
-        if release.dmgURL != nil {
-            alert.addButton(withTitle: "打开 GitHub")
-        }
 
         let response = alert.runModal()
 
-        switch response {
-        case .alertFirstButtonReturn:
-            if let dmgURL = release.dmgURL {
-                downloadUpdate(dmgURL: dmgURL)
-            } else {
-                UpdateChecker.openReleasesPage()
-            }
-        case .alertThirdButtonReturn:
-            UpdateChecker.openReleasesPage()
-        default:
-            break
+        if response == .alertFirstButtonReturn, let dmgURL = release.dmgURL {
+            performAutoUpdate(dmgURL: dmgURL, expectedSize: release.dmgSize)
         }
     }
 
-    private func downloadUpdate(dmgURL: String) {
-        fputs("[AppDelegate] 下载更新: \(dmgURL)\n", stderr)
-        // TODO: 进度条 UI
-        UpdateChecker.downloadAndInstall(dmgURL: dmgURL, progress: { progress in
-            fputs("[AppDelegate] 下载进度: \(Int(progress * 100))%\n", stderr)
+    private func performAutoUpdate(dmgURL: String, expectedSize: Int64) {
+        fputs("[AppDelegate] 开始自动更新: \(dmgURL)\n", stderr)
+
+        UpdateChecker.autoUpdate(dmgURL: dmgURL, expectedSize: expectedSize, progress: { pct, status in
+            fputs("[AppDelegate] \(status)\n", stderr)
         }) { [weak self] success, error in
-            if success {
-                fputs("[AppDelegate] ✅ 下载完成，DMG 已打开\n", stderr)
-                // 提示用户替换 app
-                self?.showAlert(title: "下载完成",
-                    message: "DMG 已打开。请将新版 VoiceInput.app 拖到 /Applications 替换旧版本，然后重启。")
-            } else if let error = error {
-                fputs("[AppDelegate] ❌ 下载失败: \(error.localizedDescription)\n", stderr)
-                self?.showAlert(title: "下载失败", message: error.localizedDescription)
+            if !success {
+                let msg = error?.localizedDescription ?? "未知错误"
+                fputs("[AppDelegate] ❌ 自动更新失败: \(msg)\n", stderr)
+                self?.showAlert(title: "更新失败", message: msg)
             }
         }
     }
