@@ -247,6 +247,28 @@ final class StatusBarController {
         modelItem.submenu = modelMenu
         menu.addItem(modelItem)
 
+        // ─── 语言 ────────────────────────────────────────
+        let langMenu = NSMenu()
+
+        let langOptions: [(title: String, mode: String)] = [
+            ("中文+英文（推荐）", "zh+en"),
+            ("仅中文", "zh"),
+            ("仅英文", "en"),
+            ("自动（全部语言）", "auto"),
+        ]
+
+        for opt in langOptions {
+            let item = NSMenuItem(title: opt.title, action: #selector(selectLanguageMode(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = opt.mode
+            item.state = settings.languageMode == opt.mode ? .on : .off
+            langMenu.addItem(item)
+        }
+
+        let langItem = NSMenuItem(title: "语言: \(settings.languageModeName)", action: nil, keyEquivalent: "")
+        langItem.submenu = langMenu
+        menu.addItem(langItem)
+
         menu.addItem(.separator())
 
         // ─── 权限状态 ─────────────────────────────────────
@@ -326,6 +348,12 @@ final class StatusBarController {
     @objc private func selectModelInt8() {
         settings.modelType = "int8"
         onModelTypeChanged?("int8")
+    }
+
+    @objc private func selectLanguageMode(_ sender: NSMenuItem) {
+        guard let mode = sender.representedObject as? String else { return }
+        settings.languageMode = mode
+        fputs("[StatusBar] 语言模式切换: \(mode) (\(settings.languageModeName))\n", stderr)
     }
 
     @objc private func selectModelFloat32() {

@@ -283,7 +283,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 后处理：清理识别结果
         let rawText = result.text
         let cleanedText = TextPostProcessor.clean(rawText)
-        let lang = result.lang.isEmpty ? TextPostProcessor.extractLanguage(rawText) : result.lang
+        var lang = result.lang.isEmpty ? TextPostProcessor.extractLanguage(rawText) : result.lang
+
+        // 语言白名单过滤
+        let allowed = settings.allowedLanguages
+        let filtered = TextPostProcessor.filterByLanguage(cleanedText.isEmpty ? rawText : cleanedText, detectedLang: lang, allowed: allowed)
+        lang = filtered.lang
         let langName = TextPostProcessor.languageName(lang)
 
         // 优先用清理后文本，若清理后为空但原文有内容则用原文（去 token 后）

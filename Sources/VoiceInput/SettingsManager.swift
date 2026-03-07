@@ -19,6 +19,7 @@ final class SettingsManager {
         static let hotkeyMode      = "voiceinput.hotkeyMode"      // "ptt" / "toggle"
         static let triggerKeyCode  = "voiceinput.triggerKeyCode"   // UInt16
         static let modelType       = "voiceinput.modelType"        // "int8" / "float32"
+        static let languageMode    = "voiceinput.languageMode"      // "auto" / "zh" / "en" / "zh+en"
         static let launchAtLogin   = "voiceinput.launchAtLogin"    // Bool
         static let showNotification = "voiceinput.showNotification" // Bool
     }
@@ -37,6 +38,7 @@ final class SettingsManager {
             Keys.hotkeyMode:       "ptt",
             Keys.triggerKeyCode:   UInt16(0x3D),   // 右 Option
             Keys.modelType:        "int8",
+            Keys.languageMode:     "zh+en",        // 默认中英双语
             Keys.launchAtLogin:    false,
             Keys.showNotification: true,
         ])
@@ -104,6 +106,33 @@ final class SettingsManager {
     /// 模型类型显示名称
     var modelTypeName: String {
         modelType == "float32" ? "float32 (精确)" : "int8 (快速)"
+    }
+
+    /// 语言模式："auto" / "zh" / "en" / "zh+en"
+    var languageMode: String {
+        get { defaults.string(forKey: Keys.languageMode) ?? "zh+en" }
+        set { defaults.set(newValue, forKey: Keys.languageMode) }
+    }
+
+    var languageModeName: String {
+        switch languageMode {
+        case "zh":    return "仅中文"
+        case "en":    return "仅英文"
+        case "zh+en": return "中文+英文"
+        case "auto":  return "自动（全部语言）"
+        default:      return languageMode
+        }
+    }
+
+    /// 当前允许的语言代码列表
+    var allowedLanguages: Set<String> {
+        switch languageMode {
+        case "zh":    return ["zh"]
+        case "en":    return ["en"]
+        case "zh+en": return ["zh", "en"]
+        case "auto":  return ["zh", "en", "ja", "ko", "yue"]
+        default:      return ["zh", "en"]
+        }
     }
 
     // MARK: - 开机启动

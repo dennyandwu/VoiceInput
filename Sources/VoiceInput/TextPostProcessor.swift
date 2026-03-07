@@ -81,4 +81,39 @@ struct TextPostProcessor {
         default: return code
         }
     }
+
+    /// 检查检测到的语言是否在白名单内
+    /// 如果不在白名单，尝试将结果映射到最可能的白名单语言
+    static func filterByLanguage(_ text: String, detectedLang: String, allowed: Set<String>) -> (text: String, lang: String) {
+        // 如果在白名单内，直接返回
+        if allowed.contains(detectedLang) {
+            return (text, detectedLang)
+        }
+
+        // 日语误判处理：如果白名单包含中文，日语结果很可能是中文
+        // 因为日语和中文共享大量汉字
+        if detectedLang == "ja" && allowed.contains("zh") {
+            fputs("[PostProcessor] 语言重映射: ja → zh（白名单不含日语）\n", stderr)
+            return (text, "zh")
+        }
+
+        // 粤语误判处理：如果白名单包含中文，粤语结果映射为中文
+        if detectedLang == "yue" && allowed.contains("zh") {
+            fputs("[PostProcessor] 语言重映射: yue → zh（白名单不含粤语）\n", stderr)
+            return (text, "zh")
+        }
+
+        // 韩语误判处理：如果白名单包含中文或英文，丢弃
+        if detectedLang == "ko" && !allowed.contains("ko") {
+            fputs("[PostProcessor] 语言过滤: ko 不在白名单，文本可能误判\n", stderr)
+            // 韩语和中英差异大，不好重映射，但仍然返回（用户可能确实说了类似的音）
+            let fallback = allowed.contains("zh") ? "zh" : (allowed.first ?? "en")
+            return (text, fallback)
+        }
+
+        // 其他情况：映射到白名单中第一个语言
+        let fallback = allowed.contains("zh") ? "zh" : (allowed.first ?? "en")
+        fputs("[PostProcessor] 语言重映射: \(detectedLang) → \(fallback)\n", stderr)
+        return (text, fallback)
+    }
 }
