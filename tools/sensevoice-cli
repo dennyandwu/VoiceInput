@@ -1,0 +1,255 @@
+#!/bin/bash
+# sensevoice-cli — SenseVoice ASR CLI（兼容 whisper-cli 接口）
+# 用法: sensevoice-cli -m <model_dir> -otxt -of <output_base> <wav_file>
+# 或:   sensevoice-cli <wav_file>  (直接输出到 stdout)
+
+set -euo pipefail
+
+# ─── 默认路径 ───
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+VOICEINPUT_DIR="${SENSEVOICE_HOME:-/Users/0xfg_bot/.openclaw/workspace-satoshi/VoiceInput}"
+SHERPA_LIB_DIR="$VOICEINPUT_DIR/sherpa-onnx-v1.12.28-osx-universal2-shared/lib"
+MODEL_DIR="$VOICEINPUT_DIR/Resources/models/sense-voice"
+SILERO_MODEL="$VOICEINPUT_DIR/Resources/models/silero-vad/silero_vad.onnx"
+
+# ─── 解析参数（兼容 whisper-cli 接口）───
+OUTPUT_TXT=false
+OUTPUT_BASE=""
+MODEL_PATH=""
+WAV_FILE=""
+LANGUAGE="auto"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -m)
+            MODEL_PATH="$2"; shift 2 ;;
+        -otxt|--output-txt)
+            OUTPUT_TXT=true; shift ;;
+        -of|--output-file)
+            OUTPUT_BASE="$2"; shift 2 ;;
+        -l|--language)
+            LANGUAGE="$2"; shift 2 ;;
+        -t|--threads)
+            shift 2 ;;  # 忽略，sensevoice 自动管理线程
+        -f|--file)
+            WAV_FILE="$2"; shift 2 ;;
+        --no-timestamps|-nt)
+            shift ;;  # 忽略
+        -*)
+            shift ;;  # 忽略其他 whisper-cli 参数
+        *)
+            WAV_FILE="$1"; shift ;;
+    esac
+done
+
+if [[ -z "$WAV_FILE" ]]; then
+    echo "Usage: sensevoice-cli [options] <wav_file>" >&2
+    echo "  -m <model_dir>    Model directory (default: SenseVoice int8)" >&2
+    echo "  -otxt             Output to .txt file" >&2
+    echo "  -of <base>        Output file base name" >&2
+    echo "  -l <lang>         Language: auto/zh/en/ja/ko/yue (default: auto)" >&2
+    exit 1
+fi
+
+if [[ ! -f "$WAV_FILE" ]]; then
+    echo "Error: file not found: $WAV_FILE" >&2
+    exit 1
+fi
+
+# ─── 确定模型路径 ───
+if [[ -n "$MODEL_PATH" && -d "$MODEL_PATH" ]]; then
+    # 如果 -m 指向目录，查找模型文件
+    if [[ -f "$MODEL_PATH/model.int8.onnx" ]]; then
+        SENSE_MODEL="$MODEL_PATH/model.int8.onnx"
+        TOKENS="$MODEL_PATH/tokens.txt"
+    elif [[ -f "$MODEL_PATH/model.onnx" ]]; then
+        SENSE_MODEL="$MODEL_PATH/model.onnx"
+        TOKENS="$MODEL_PATH/tokens.txt"
+    fi
+elif [[ -n "$MODEL_PATH" && -f "$MODEL_PATH" ]]; then
+    SENSE_MODEL="$MODEL_PATH"
+    TOKENS="$(dirname "$MODEL_PATH")/tokens.txt"
+else
+    SENSE_MODEL="$MODEL_DIR/model.int8.onnx"
+    TOKENS="$MODEL_DIR/tokens.txt"
+fi
+
+# 验证
+for f in "$SENSE_MODEL" "$TOKENS"; do
+    if [[ ! -f "$f" ]]; then
+        echo "Error: missing file: $f" >&2
+        exit 1
+    fi
+done
+
+# ─── 音频预处理：转 16kHz mono WAV ───
+TEMP_WAV=$(mktemp /tmp/sensevoice_XXXXXX.wav)
+trap "rm -f $TEMP_WAV" EXIT
+
+ffmpeg -i "$WAV_FILE" -ar 16000 -ac 1 -f wav "$TEMP_WAV" -y -loglevel error 2>/dev/null
+
+# ─── 调用 sherpa-onnx CLI ───
+export DYLD_LIBRARY_PATH="$SHERPA_LIB_DIR:${DYLD_LIBRARY_PATH:-}"
+
+# 检查是否有编译好的 CLI
+SENSEVOICE_BIN="$VOICEINPUT_DIR/sensevoice-transcribe"
+
+if [[ ! -f "$SENSEVOICE_BIN" ]]; then
+    # 编译轻量 transcriber
+    cat > /tmp/sensevoice_transcribe.swift << 'SWIFT_EOF'
+import Foundation
+
+// 最小化 SenseVoice 转录工具
+// 用法: sensevoice-transcribe <model> <tokens> <wav>
+
+guard CommandLine.arguments.count >= 4 else {
+    fputs("Usage: sensevoice-transcribe <model.onnx> <tokens.txt> <audio.wav>\n", stderr)
+    exit(1)
+}
+
+let modelPath = CommandLine.arguments[1]
+let tokensPath = CommandLine.arguments[2]
+let wavPath = CommandLine.arguments[3]
+let language = CommandLine.arguments.count >= 5 ? CommandLine.arguments[4] : "auto"
+
+// 加载模型
+let senseVoiceConfig = sherpaOnnxOfflineSenseVoiceModelConfig(
+    model: modelPath,
+    language: language,
+    useInverseTextNormalization: true
+)
+
+let modelConfig = sherpaOnnxOfflineModelConfig(
+    tokens: tokensPath,
+    numThreads: 4,
+    provider: "cpu",
+    debug: 0,
+    senseVoice: senseVoiceConfig
+)
+
+let featConfig = sherpaOnnxFeatureConfig(
+    sampleRate: 16000,
+    featureDim: 80
+)
+
+var config = sherpaOnnxOfflineRecognizerConfig(
+    featConfig: featConfig,
+    modelConfig: modelConfig
+)
+
+let t0 = Date()
+guard let recognizer = SherpaOnnxOfflineRecognizer(config: &config) else {
+    fputs("Error: failed to create recognizer\n", stderr)
+    exit(1)
+}
+let loadTime = Date().timeIntervalSince(t0)
+fputs("[sensevoice-cli] Model loaded in \(String(format: "%.3f", loadTime))s\n", stderr)
+
+// 读取 WAV 文件
+let fileURL = URL(fileURLWithPath: wavPath)
+guard let audioFile = try? AVAudioFile(forReading: fileURL) else {
+    fputs("Error: cannot read \(wavPath)\n", stderr)
+    exit(1)
+}
+
+let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false)!
+let frameCount = AVAudioFrameCount(audioFile.length)
+guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
+    fputs("Error: cannot create buffer\n", stderr)
+    exit(1)
+}
+
+// 如果格式不匹配，需要转换
+if audioFile.processingFormat.sampleRate != 16000 || audioFile.processingFormat.channelCount != 1 {
+    let srcFormat = audioFile.processingFormat
+    let srcBuffer = AVAudioPCMBuffer(pcmFormat: srcFormat, frameCapacity: frameCount)!
+    try! audioFile.read(into: srcBuffer)
+    
+    guard let converter = AVAudioConverter(from: srcFormat, to: format) else {
+        fputs("Error: cannot create converter\n", stderr)
+        exit(1)
+    }
+    
+    let ratio = 16000.0 / srcFormat.sampleRate
+    let outFrames = AVAudioFrameCount(Double(srcBuffer.frameLength) * ratio)
+    guard let outBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: outFrames) else {
+        fputs("Error: cannot create output buffer\n", stderr)
+        exit(1)
+    }
+    
+    var error: NSError?
+    var consumed = false
+    converter.convert(to: outBuffer, error: &error) { _, outStatus in
+        if consumed {
+            outStatus.pointee = .noDataNow
+            return nil
+        }
+        consumed = true
+        outStatus.pointee = .haveData
+        return srcBuffer
+    }
+    
+    let samples = Array(UnsafeBufferPointer(start: outBuffer.floatChannelData![0], count: Int(outBuffer.frameLength)))
+    
+    let t1 = Date()
+    let result = recognizer.decode(samples: samples, sampleRate: 16000)
+    let recTime = Date().timeIntervalSince(t1)
+    let duration = Double(samples.count) / 16000.0
+    
+    fputs("[sensevoice-cli] \(String(format: "%.2f", duration))s audio in \(String(format: "%.3f", recTime))s (RTF=\(String(format: "%.4f", recTime/duration)))\n", stderr)
+    
+    // 清理 SenseVoice tokens
+    let cleaned = result.text
+        .replacingOccurrences(of: "<\\|[^|]+\\|>", with: "", options: .regularExpression)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    
+    print(cleaned)
+} else {
+    try! audioFile.read(into: buffer)
+    let samples = Array(UnsafeBufferPointer(start: buffer.floatChannelData![0], count: Int(buffer.frameLength)))
+    
+    let t1 = Date()
+    let result = recognizer.decode(samples: samples, sampleRate: 16000)
+    let recTime = Date().timeIntervalSince(t1)
+    let duration = Double(samples.count) / 16000.0
+    
+    fputs("[sensevoice-cli] \(String(format: "%.2f", duration))s audio in \(String(format: "%.3f", recTime))s (RTF=\(String(format: "%.4f", recTime/duration)))\n", stderr)
+    
+    let cleaned = result.text
+        .replacingOccurrences(of: "<\\|[^|]+\\|>", with: "", options: .regularExpression)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    
+    print(cleaned)
+}
+SWIFT_EOF
+
+    # 编译
+    SHERPA_DIR="$VOICEINPUT_DIR/sherpa-onnx-v1.12.28-osx-universal2-shared"
+    swiftc -O \
+        -import-objc-header "$VOICEINPUT_DIR/Sources/VoiceInput/SherpaOnnx-Bridging-Header.h" \
+        "$VOICEINPUT_DIR/Sources/VoiceInput/SherpaOnnx.swift" \
+        /tmp/sensevoice_transcribe.swift \
+        -I "$SHERPA_DIR/include" \
+        -L "$SHERPA_DIR/lib" \
+        -lsherpa-onnx-c-api \
+        -lonnxruntime \
+        -Xlinker -rpath -Xlinker "$SHERPA_DIR/lib" \
+        -framework AVFoundation \
+        -framework Foundation \
+        -o "$SENSEVOICE_BIN" 2>&1 >&2
+fi
+
+# ─── 执行识别 ───
+RESULT=$("$SENSEVOICE_BIN" "$SENSE_MODEL" "$TOKENS" "$TEMP_WAV" "$LANGUAGE" 2>/dev/null)
+
+# 如果识别失败，输出 stderr 版本
+if [[ -z "$RESULT" ]]; then
+    RESULT=$("$SENSEVOICE_BIN" "$SENSE_MODEL" "$TOKENS" "$TEMP_WAV" "$LANGUAGE" 2>&2)
+fi
+
+# ─── 输出 ───
+if [[ "$OUTPUT_TXT" == true && -n "$OUTPUT_BASE" ]]; then
+    echo "$RESULT" > "${OUTPUT_BASE}.txt"
+fi
+
+echo "$RESULT"
