@@ -199,6 +199,9 @@ class AudioRecorder {
             var error: NSError?
             let status = conv.convert(to: outputBuffer, error: &error, withInputFrom: inputBlock)
 
+            // 重置 converter 状态，否则收到 endOfStream 后不再处理后续 buffer
+            conv.reset()
+
             if let err = error {
                 fputs("[AudioRecorder] 格式转换错误: \(err)\n", stderr)
                 return

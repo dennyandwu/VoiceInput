@@ -427,7 +427,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
 
                 let current = UpdateChecker.currentVersion
-                if UpdateChecker.isNewerVersion(release.version, than: current) {
+                let isNewer = UpdateChecker.isNewerVersion(release.version, than: current)
+                fputs("[AppDelegate] 版本比较: remote=\(release.version) vs local=\(current) → isNewer=\(isNewer)\n", stderr)
+
+                if isNewer {
                     self?.showUpdateAlert(release: release)
                 } else {
                     self?.showAlert(title: "已是最新版本",
