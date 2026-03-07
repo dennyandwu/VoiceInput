@@ -1,6 +1,6 @@
 // Sources/VoiceInput/TextPostProcessor.swift
 // 识别结果后处理 — 清理、规范化、过滤
-// Phase 6: Beta 优化
+// Phase 6: Beta 优化 | Phase 3: 中英混合增强
 // Copyright (c) 2026 urDAO Investment
 
 import Foundation
@@ -131,5 +131,86 @@ struct TextPostProcessor {
         let fallback = allowed.contains("zh") ? "zh" : (allowed.first ?? "en")
         fputs("[PostProcessor] 语言重映射: \(detectedLang) → \(fallback)\n", stderr)
         return (text, fallback)
+    }
+
+    // MARK: - Phase 3: 中英混合增强
+
+    /// 修复中英混合标点
+    ///
+    /// 规则：
+    /// - 前后都是中文字符时，英文逗号 `,` → `，`
+    /// - 句末且前面是中文字符时，英文句号 `.` → `。`
+    static func fixMixedPunctuation(_ text: String) -> String {
+        guard !text.isEmpty else { return text }
+
+        var chars = Array(text)
+        var result = [Character]()
+        result.reserveCapacity(chars.count)
+
+        /// 判断 Unicode Scalar 是否为 CJK 汉字
+        func isChinese(_ c: Character) -> Bool {
+            guard let scalar = c.unicodeScalars.first else { return false }
+            return (0x4E00...0x9FFF).contains(scalar.value) ||
+                   (0x3400...0x4DBF).contains(scalar.value) ||
+                   (0x3040...0x30FF).contains(scalar.value) ||
+                   (0xAC00...0xD7AF).contains(scalar.value)
+        }
+
+        for i in 0..<chars.count {
+            let c = chars[i]
+
+            if c == "," {
+                // 前一字符存在且为中文，后一字符存在且为中文 → 替换
+                let prevChinese = i > 0 && isChinese(chars[i - 1])
+                let nextChinese = i < chars.count - 1 && isChinese(chars[i + 1])
+                if prevChinese && nextChinese {
+                    result.append("，")
+                } else {
+                    result.append(c)
+                }
+            } else if c == "." {
+                // 句末（最后一字符）且前面是中文 → 替换为句号
+                let isEnd = i == chars.count - 1
+                let prevChinese = i > 0 && isChinese(chars[i - 1])
+                // 也处理 ".<space>$" 的情况（尾部空格）
+                let isNearEnd = i == chars.count - 1 ||
+                    (i == chars.count - 2 && chars[i + 1] == " ")
+                if prevChinese && (isEnd || isNearEnd) {
+                    result.append("。")
+                } else {
+                    result.append(c)
+                }
+            } else {
+                result.append(c)
+            }
+        }
+
+        return String(result)
+    }
+
+    /// 应用所有后处理：clean + fixMixedPunctuation + 语言过滤
+    ///
+    /// - Parameters:
+    ///   - raw: ASR 原始输出（可含 SenseVoice token）
+    ///   - allowedLanguages: 允许的语言白名单（空集合 = 不过滤）
+    /// - Returns: `(text, lang)` 元组，text 为空表示应丢弃
+    static func process(_ raw: String, allowedLanguages: Set<String>) -> (text: String, lang: String) {
+        // Step 1: 提取语言
+        let detectedLang = extractLanguage(raw).isEmpty ? "zh" : extractLanguage(raw)
+
+        // Step 2: 清理文本（去 token、去噪）
+        var text = clean(raw)
+        guard !text.isEmpty else {
+            return ("", detectedLang)
+        }
+
+        // Step 3: 修复中英混合标点
+        text = fixMixedPunctuation(text)
+
+        // Step 4: 语言过滤（空白名单 = 不过滤）
+        if allowedLanguages.isEmpty {
+            return (text, detectedLang)
+        }
+        return filterByLanguage(text, detectedLang: detectedLang, allowed: allowedLanguages)
     }
 }

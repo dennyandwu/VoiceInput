@@ -60,6 +60,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 异步加载模型（避免阻塞 UI 启动）
         loadPipelineAsync()
 
+        // 初始化词库（Phase 1: SQLite 词库系统）
+        _ = WordLibraryManager.shared  // 触发单例初始化
+
+        // 后台静默检查更新（延迟 10s，避开启动期）
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
+            guard UpdateChecker.shouldPeriodicCheck else { return }
+            UpdateChecker.checkForUpdateSilent { [weak self] release in
+                guard let release = release else { return }
+                DispatchQueue.main.async {
+                    self?.showUpdateAlert(release: release)
+                }
+            }
+        }
+
         fputs("[AppDelegate] VoiceInput GUI 模式已启动\n", stderr)
         fputs("[AppDelegate] 模型: \(settings.modelTypeName), 热键: \(settings.triggerKeyName), 模式: \(settings.hotkeyModeName)\n", stderr)
     }
@@ -302,15 +316,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let langName = TextPostProcessor.languageName(lang)
 
         // 优先用清理后文本，若清理后为空但原文有内容则用原文（去 token 后）
-        let finalText: String
+        var processedText: String
         if !cleanedText.isEmpty {
-            finalText = cleanedText
+            processedText = cleanedText
         } else {
             // 去掉 SenseVoice token 但保留原始内容
             let stripped = rawText.replacingOccurrences(of: #"<\|[^|]+\|>"#, with: "", options: .regularExpression)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if stripped.count > 1 {
-                finalText = stripped
+                processedText = stripped
                 fputs("[AppDelegate] ℹ️ PostProcessor 过滤了原文，降级使用去 token 文本: \"\(stripped)\"\n", stderr)
             } else {
                 fputs("[AppDelegate] ℹ️ 识别结果为空或无意义（原文: \"\(rawText)\"）\n", stderr)
@@ -322,6 +336,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
         }
+
+        // 词库修正（Phase 1: SQLite 词库系统）
+        let beforeCorrection = processedText
+        processedText = WordLibraryManager.shared.applyCorrections(to: processedText)
+        if processedText != beforeCorrection {
+            fputs("[AppDelegate] 📚 词库修正: \"\(beforeCorrection)\" → \"\(processedText)\"\n", stderr)
+        }
+
+        let finalText = processedText
 
         fputs("[AppDelegate] ✅ 识别结果: \"\(finalText)\" [lang=\(lang), RTF=\(String(format: "%.3f", result.processingTime / max(result.duration, 0.001)))]\n", stderr)
 
@@ -461,6 +484,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showUpdateAlert(release: UpdateChecker.ReleaseInfo) {
         let sizeStr = release.dmgSize > 0 ? "\(release.dmgSize / 1024 / 1024)MB" : "未知大小"
+        let changelog = UpdateChecker.formatChangelog(release.body)
 
         let alert = NSAlert()
         alert.messageText = "发现新版本 \(release.tagName)"
@@ -470,16 +494,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         下载大小: \(sizeStr)
 
         更新内容:
-        \(release.body.prefix(500))
+        \(changelog)
         """
         alert.alertStyle = .informational
         alert.addButton(withTitle: "自动更新")
         alert.addButton(withTitle: "稍后再说")
+        alert.addButton(withTitle: "跳过此版本")
 
         let response = alert.runModal()
 
         if response == .alertFirstButtonReturn, let dmgURL = release.dmgURL {
             performAutoUpdate(dmgURL: dmgURL, expectedSize: release.dmgSize)
+        } else if response == .alertThirdButtonReturn {
+            UpdateChecker.skipVersion(release.version)
         }
     }
 

@@ -307,21 +307,61 @@ class RecognitionPipeline {
         let t0 = Date()
 
         // 第一遍：SenseVoice（快速语言检测 + 中文识别）
-        let result = engine.recognize(audioData: audioData, sampleRate: 16000)
-        let lang = TextPostProcessor.extractLanguage(result.text).isEmpty
-            ? result.lang
-            : TextPostProcessor.extractLanguage(result.text)
+        let senseVoiceResult = engine.recognize(audioData: audioData, sampleRate: 16000)
+        let detectedLang = TextPostProcessor.extractLanguage(senseVoiceResult.text).isEmpty
+            ? senseVoiceResult.lang
+            : TextPostProcessor.extractLanguage(senseVoiceResult.text)
 
-        var finalResult = result
+        let svText = TextPostProcessor.clean(senseVoiceResult.text)
+        let svChinese = chineseRatio(svText)
+        let svASCII = asciiRatio(svText)
+        let svDom = dominantLanguage(svText)
 
-        // 第二遍：如果检测到英文 + Whisper 已加载 → 用 Whisper 重新识别
-        if lang == "en" && engine.hasWhisper {
-            fputs("[Pipeline] 检测到英文，使用 Whisper 重新识别...\n", stderr)
-            let whisperResult = engine.recognizeWithWhisper(audioData: audioData, sampleRate: 16000)
-            if !whisperResult.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                fputs("[Pipeline] Whisper 结果: \"\(whisperResult.text)\"\n", stderr)
-                fputs("[Pipeline] SenseVoice 结果: \"\(result.text)\"（已替换）\n", stderr)
-                finalResult = whisperResult
+        fputs("[Pipeline] SenseVoice: lang=\(detectedLang), dom=\(svDom), zh=\(String(format: "%.1f%%", svChinese * 100)), ascii=\(String(format: "%.1f%%", svASCII * 100)), text=\"\(svText)\"\n", stderr)
+
+        var finalResult = senseVoiceResult
+
+        // MARK: 智能路由策略
+        if svDom == "zh" {
+            // a. 纯中文（>80% 中文字符）→ 直接用 SenseVoice
+            fputs("[Pipeline] 路由: 纯中文 → SenseVoice\n", stderr)
+
+        } else if svDom == "en" {
+            // b. 纯英文（>80% ASCII）→ 用 Whisper（如已加载）
+            if engine.hasWhisper {
+                fputs("[Pipeline] 路由: 纯英文 → Whisper\n", stderr)
+                let whisperResult = engine.recognizeWithWhisper(audioData: audioData, sampleRate: 16000)
+                if !whisperResult.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    fputs("[Pipeline] Whisper 结果: \"\(whisperResult.text)\"\n", stderr)
+                    finalResult = whisperResult
+                } else {
+                    fputs("[Pipeline] Whisper 返回空，回退 SenseVoice\n", stderr)
+                }
+            } else {
+                fputs("[Pipeline] 路由: 纯英文但 Whisper 未加载 → SenseVoice\n", stderr)
+            }
+
+        } else {
+            // c. 中英混合（20%-80%）
+            if engine.hasWhisper {
+                fputs("[Pipeline] 路由: 中英混合 → Whisper 优先，校验中文保留\n", stderr)
+                let whisperResult = engine.recognizeWithWhisper(audioData: audioData, sampleRate: 16000)
+                let wText = TextPostProcessor.clean(whisperResult.text)
+                let wChinese = chineseRatio(wText)
+
+                fputs("[Pipeline] Whisper: zh=\(String(format: "%.1f%%", wChinese * 100)), text=\"\(wText)\"\n", stderr)
+
+                // Whisper 结果中文比例 >= SenseVoice 的 50%：Whisper 保留了足够多的中文 → 用 Whisper
+                let threshold = svChinese * 0.5
+                if !wText.isEmpty && wChinese >= threshold {
+                    fputs("[Pipeline] Whisper 中文保留率 OK（\(String(format: "%.1f%%", wChinese * 100)) >= \(String(format: "%.1f%%", threshold * 100))），采用 Whisper\n", stderr)
+                    finalResult = whisperResult
+                } else {
+                    // Whisper 丢失了太多中文 → 保留 SenseVoice
+                    fputs("[Pipeline] Whisper 中文保留率不足，回退 SenseVoice（保护中文内容）\n", stderr)
+                }
+            } else {
+                fputs("[Pipeline] 路由: 中英混合但 Whisper 未加载 → SenseVoice\n", stderr)
             }
         }
 
@@ -338,5 +378,41 @@ class RecognitionPipeline {
             duration: duration,
             processingTime: elapsed
         )
+    }
+
+    // MARK: - 语言分析辅助函数
+
+    /// 计算文本中中文字符（CJK）的比例
+    private func chineseRatio(_ text: String) -> Double {
+        guard !text.isEmpty else { return 0.0 }
+        let total = text.unicodeScalars.count
+        let chinese = text.unicodeScalars.filter { scalar in
+            (0x4E00...0x9FFF).contains(scalar.value) ||  // CJK 统一表意文字
+            (0x3400...0x4DBF).contains(scalar.value) ||  // CJK 扩展 A
+            (0x20000...0x2A6DF).contains(scalar.value)   // CJK 扩展 B
+        }.count
+        return Double(chinese) / Double(total)
+    }
+
+    /// 计算文本中 ASCII 可打印字符（字母+数字）的比例
+    private func asciiRatio(_ text: String) -> Double {
+        guard !text.isEmpty else { return 0.0 }
+        let total = text.unicodeScalars.count
+        let ascii = text.unicodeScalars.filter { scalar in
+            (0x41...0x5A).contains(scalar.value) || // A-Z
+            (0x61...0x7A).contains(scalar.value) || // a-z
+            (0x30...0x39).contains(scalar.value)    // 0-9
+        }.count
+        return Double(ascii) / Double(total)
+    }
+
+    /// 判断文本的主导语言
+    /// - Returns: "zh"（纯中文 >80%）/ "en"（纯英文 >80%）/ "mixed"（混合）
+    private func dominantLanguage(_ text: String) -> String {
+        let zh = chineseRatio(text)
+        let en = asciiRatio(text)
+        if zh > 0.8 { return "zh" }
+        if en > 0.8 { return "en" }
+        return "mixed"
     }
 }

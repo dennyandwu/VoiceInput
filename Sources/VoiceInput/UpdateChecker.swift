@@ -1,5 +1,6 @@
 // Sources/VoiceInput/UpdateChecker.swift
 // GitHub Releases 自动更新检查 + 一键自动替换
+// v2.0: 增强版 — 支持进度回调、变更日志展示、静默检查间隔
 // Copyright (c) 2026 urDAO Investment
 
 import Foundation
@@ -19,11 +20,19 @@ final class UpdateChecker {
     /// DMG 最小合法大小（字节），低于此值视为下载损坏
     static let minDMGSize: Int64 = 50_000_000  // 50MB
 
+    /// 自动检查间隔（秒）— 24 小时
+    static let autoCheckInterval: TimeInterval = 86400
+
+    /// UserDefaults key：上次检查时间
+    private static let lastCheckKey = "voiceinput.updatecheck.lastcheck"
+    /// UserDefaults key：已跳过的版本
+    private static let skippedVersionKey = "voiceinput.updatecheck.skippedversion"
+
     // MARK: - Types
 
     struct ReleaseInfo {
-        let version: String    // e.g. "1.0.5-beta"
-        let tagName: String    // e.g. "v1.0.5-beta"
+        let version: String    // e.g. "2.0.0"
+        let tagName: String    // e.g. "v2.0.0"
         let body: String       // release notes
         let dmgURL: String?    // DMG download URL
         let dmgSize: Int64     // DMG expected size (bytes)
@@ -40,6 +49,24 @@ final class UpdateChecker {
     /// 当前 app 路径
     static var currentAppPath: String {
         Bundle.main.bundlePath
+    }
+
+    /// 是否应该进行定期检查（距上次检查超过 autoCheckInterval）
+    static var shouldPeriodicCheck: Bool {
+        let lastCheck = UserDefaults.standard.double(forKey: lastCheckKey)
+        guard lastCheck > 0 else { return true }
+        return Date().timeIntervalSince1970 - lastCheck > autoCheckInterval
+    }
+
+    /// 标记本次检查时间
+    static func markChecked() {
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: lastCheckKey)
+    }
+
+    /// 跳过某个版本
+    static func skipVersion(_ version: String) {
+        UserDefaults.standard.set(version, forKey: skippedVersionKey)
+        fputs("[UpdateChecker] 已跳过版本: \(version)\n", stderr)
     }
 
     /// 检查更新（异步）
@@ -65,7 +92,7 @@ final class UpdateChecker {
             if let httpResponse = response as? HTTPURLResponse {
                 fputs("[UpdateChecker] API 状态码: \(httpResponse.statusCode)\n", stderr)
                 if httpResponse.statusCode != 200 {
-                    completion(nil, makeError("GitHub API 返回 \(httpResponse.statusCode)（仓库可能是私有的或不存在）"))
+                    completion(nil, makeError("GitHub API 返回 \(httpResponse.statusCode)"))
                     return
                 }
             }
@@ -80,10 +107,8 @@ final class UpdateChecker {
             let body = json["body"] as? String ?? ""
             let publishedAt = json["published_at"] as? String ?? ""
 
-            // 从 tag_name 提取版本号（去掉 v 前缀）
             let version = tagName.hasPrefix("v") ? String(tagName.dropFirst()) : tagName
 
-            // 查找 DMG asset
             var dmgURL: String?
             var dmgSize: Int64 = 0
             if let assets = json["assets"] as? [[String: Any]] {
@@ -93,7 +118,7 @@ final class UpdateChecker {
                        let downloadURL = asset["browser_download_url"] as? String {
                         dmgURL = downloadURL
                         dmgSize = (asset["size"] as? Int64) ?? (asset["size"] as? Int).map { Int64($0) } ?? 0
-                        fputs("[UpdateChecker] DMG: \(name), 大小: \(dmgSize) bytes, URL: \(downloadURL)\n", stderr)
+                        fputs("[UpdateChecker] DMG: \(name), 大小: \(dmgSize) bytes\n", stderr)
                         break
                     }
                 }
@@ -108,8 +133,35 @@ final class UpdateChecker {
                 publishedAt: publishedAt
             )
 
+            markChecked()
             completion(info, nil)
         }.resume()
+    }
+
+    /// 带静默模式的检查：跳过已跳过的版本，适合后台定期检查
+    static func checkForUpdateSilent(completion: @escaping (ReleaseInfo?) -> Void) {
+        checkForUpdate { info, _ in
+            guard let info = info else {
+                completion(nil)
+                return
+            }
+
+            // 是否有新版
+            guard isNewerVersion(info.version, than: currentVersion) else {
+                completion(nil)
+                return
+            }
+
+            // 是否已跳过该版本
+            let skipped = UserDefaults.standard.string(forKey: skippedVersionKey) ?? ""
+            if skipped == info.version {
+                fputs("[UpdateChecker] 版本 \(info.version) 已被跳过\n", stderr)
+                completion(nil)
+                return
+            }
+
+            completion(info)
+        }
     }
 
     /// 比较版本号：是否有新版本
@@ -131,10 +183,19 @@ final class UpdateChecker {
         return false
     }
 
+    // MARK: - 格式化变更日志
+
+    /// 将 GitHub Release body 格式化为可读摘要（截取前 500 字符）
+    static func formatChangelog(_ body: String, maxLength: Int = 500) -> String {
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return "暂无更新说明" }
+        if trimmed.count <= maxLength { return trimmed }
+        return String(trimmed.prefix(maxLength)) + "..."
+    }
+
     // MARK: - 自动更新流程
 
     /// 下载 DMG → 挂载 → 替换 app → 重启
-    /// 全自动，用户只需确认一次
     static func autoUpdate(dmgURL: String, expectedSize: Int64,
                            progress: @escaping (Double, String) -> Void,
                            completion: @escaping (Bool, Error?) -> Void) {
@@ -157,16 +218,13 @@ final class UpdateChecker {
 
             progress(0.7, "安装更新中...")
 
-            // 挂载 → 复制 → 卸载 → 重启
             installFromDMG(dmgPath: dmgPath) { success, installError in
-                // 清理下载的 DMG
                 try? FileManager.default.removeItem(atPath: dmgPath)
 
                 if success {
                     progress(1.0, "更新完成，正在重启...")
                     fputs("[UpdateChecker] ✅ 更新完成，准备重启\n", stderr)
 
-                    // 延迟重启，让 UI 更新
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                         relaunchApp()
                     }
@@ -191,7 +249,6 @@ final class UpdateChecker {
         let destPath = tempDir.appendingPathComponent("VoiceInput-update.dmg").path
         let destURL = URL(fileURLWithPath: destPath)
 
-        // 清理旧文件
         try? FileManager.default.removeItem(at: destURL)
 
         let session = URLSession(configuration: .default, delegate: DownloadDelegate(
@@ -202,13 +259,11 @@ final class UpdateChecker {
             },
             completion: { success, error in
                 if success {
-                    // 验证文件大小
                     let attrs = try? FileManager.default.attributesOfItem(atPath: destPath)
                     let actualSize = (attrs?[.size] as? Int64) ?? 0
                     fputs("[UpdateChecker] DMG 下载完成: \(actualSize) bytes\n", stderr)
 
                     if expectedSize > 0 && actualSize < expectedSize / 2 {
-                        fputs("[UpdateChecker] ⚠️ DMG 大小异常: 期望 \(expectedSize), 实际 \(actualSize)\n", stderr)
                         completion(nil, makeError("下载文件不完整（\(actualSize / 1024 / 1024)MB / \(expectedSize / 1024 / 1024)MB）"))
                         return
                     }
@@ -232,13 +287,13 @@ final class UpdateChecker {
 
     private static func installFromDMG(dmgPath: String, completion: @escaping (Bool, Error?) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
-            // 1. 挂载 DMG
             let mountPoint = "/tmp/VoiceInput-update-mount"
             try? FileManager.default.removeItem(atPath: mountPoint)
 
             let mountProcess = Process()
             mountProcess.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
-            mountProcess.arguments = ["attach", dmgPath, "-mountpoint", mountPoint, "-noverify", "-nobrowse", "-noautoopen"]
+            mountProcess.arguments = ["attach", dmgPath, "-mountpoint", mountPoint,
+                                      "-noverify", "-nobrowse", "-noautoopen"]
 
             let mountPipe = Pipe()
             mountProcess.standardOutput = mountPipe
@@ -265,7 +320,6 @@ final class UpdateChecker {
 
             fputs("[UpdateChecker] DMG 已挂载到 \(mountPoint)\n", stderr)
 
-            // 2. 查找 .app
             let fm = FileManager.default
             guard let contents = try? fm.contentsOfDirectory(atPath: mountPoint),
                   let appName = contents.first(where: { $0.hasSuffix(".app") }) else {
@@ -281,7 +335,7 @@ final class UpdateChecker {
 
             fputs("[UpdateChecker] 替换: \(sourceApp) → \(destApp)\n", stderr)
 
-            // 3. 验证新 app 的 tokens.txt 完整性
+            // 验证新 app 的 tokens.txt 完整性
             let tokensPath = "\(sourceApp)/Contents/Resources/models/sense-voice/tokens.txt"
             if let attrs = try? fm.attributesOfItem(atPath: tokensPath),
                let size = attrs[.size] as? Int64, size < 1000 {
@@ -292,7 +346,6 @@ final class UpdateChecker {
                 return
             }
 
-            // 4. 备份当前 app
             let backupPath = destApp + ".backup"
             try? fm.removeItem(atPath: backupPath)
 
@@ -306,22 +359,18 @@ final class UpdateChecker {
                 return
             }
 
-            // 5. 复制新 app
             do {
                 try fm.copyItem(atPath: sourceApp, toPath: destApp)
                 fputs("[UpdateChecker] ✅ 新版本已复制到 \(destApp)\n", stderr)
 
-                // 移除隔离属性
                 let xattr = Process()
                 xattr.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
                 xattr.arguments = ["-r", "-d", "com.apple.quarantine", destApp]
                 try? xattr.run()
                 xattr.waitUntilExit()
 
-                // 删除备份
                 try? fm.removeItem(atPath: backupPath)
             } catch {
-                // 恢复备份
                 fputs("[UpdateChecker] ❌ 复制失败，恢复备份: \(error.localizedDescription)\n", stderr)
                 try? fm.removeItem(atPath: destApp)
                 try? fm.moveItem(atPath: backupPath, toPath: destApp)
@@ -333,7 +382,6 @@ final class UpdateChecker {
                 return
             }
 
-            // 6. 卸载 DMG
             detachDMG(mountPoint: mountPoint)
 
             DispatchQueue.main.async {
@@ -358,13 +406,11 @@ final class UpdateChecker {
         let appPath = currentAppPath
         fputs("[UpdateChecker] 重启: \(appPath)\n", stderr)
 
-        // 用 open 命令启动新版本
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
         process.arguments = ["-n", appPath]
         try? process.run()
 
-        // 退出当前进程
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             NSApp.terminate(nil)
         }
@@ -393,7 +439,8 @@ private class DownloadDelegate: NSObject, URLSessionDownloadDelegate {
     let progressHandler: (Double) -> Void
     let completionHandler: (Bool, Error?) -> Void
 
-    init(destination: URL, expectedSize: Int64, progress: @escaping (Double) -> Void, completion: @escaping (Bool, Error?) -> Void) {
+    init(destination: URL, expectedSize: Int64, progress: @escaping (Double) -> Void,
+         completion: @escaping (Bool, Error?) -> Void) {
         self.destination = destination
         self.expectedSize = expectedSize
         self.progressHandler = progress
