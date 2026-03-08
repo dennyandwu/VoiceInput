@@ -6,6 +6,9 @@
 import Foundation
 import SQLite3
 
+/// Swift 不自动导入 SQLITE_TRANSIENT，手动定义
+private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
 /// WordLibraryManager 提供本地 SQLite 词库，支持识别结果修正、热词加权、使用历史记录
 final class WordLibraryManager {
 
@@ -30,6 +33,7 @@ final class WordLibraryManager {
         ensureDirectoryExists()
         openDatabase()
         createTablesIfNeeded()
+        seedDefaultCorrections()
     }
 
     deinit {
@@ -104,6 +108,84 @@ final class WordLibraryManager {
         // 索引：按 original 快速查找
         execute("CREATE INDEX IF NOT EXISTS idx_words_original ON words(original);")
         execute("CREATE INDEX IF NOT EXISTS idx_words_weight ON words(weight DESC);")
+    }
+
+    private func seedDefaultCorrections() {
+        let seededKey = "WordLibrary.seeded.v1"
+        guard !UserDefaults.standard.bool(forKey: seededKey) else { return }
+
+        fputs("[WordLibrary] Seeding default corrections (v1)...\n", stderr)
+
+        let now = Int(Date().timeIntervalSince1970)
+        let weight = 10
+
+        // 预置修正规则
+        let corrections: [(original: String, correction: String)] = [
+            // 1. 英文缩写/技术术语（SenseVoice 常见错误）
+            ("TSSSSSTT", "STT"),
+            ("TSSTT",    "STT"),
+            ("TSTT",     "STT"),
+            ("A S R",    "ASR"),
+            ("A P I",    "API"),
+            ("G P T",    "GPT"),
+            ("O P E N",  "OPEN"),
+            ("G I T",    "GIT"),
+            ("G I T H U B", "GitHub"),
+            ("S Q L",    "SQL"),
+
+            // 2. 品牌/产品名
+            ("open claw",  "OpenClaw"),
+            ("openclaw",   "OpenClaw"),
+            ("voice input", "VoiceInput"),
+            ("chat gpt",   "ChatGPT"),
+            ("chat g p t", "ChatGPT"),
+
+            // 3. 中文填充词移除（映射为空字符串或保留标点）
+            ("呃，", "，"),
+            ("呃,",  ","),
+            ("嗯，", "，"),
+            ("嗯,",  ","),
+            ("那个，", "，"),
+            ("那个,",  ","),
+            ("就是说，", "，"),
+            ("就是说,",  ","),
+
+            // 4. 常见中文 ASR 错误
+            ("因该", "应该"),
+            ("做为", "作为"),
+            ("在坐", "在座"),
+            ("侯选", "候选"),
+        ]
+
+        // Batch INSERT with transaction
+        execute("BEGIN TRANSACTION;")
+
+        let insertSql = """
+            INSERT OR IGNORE INTO words (original, correction, weight, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?);
+        """
+
+        var successCount = 0
+        for entry in corrections {
+            guard let stmt = prepare(insertSql) else { continue }
+            sqlite3_bind_text(stmt, 1, entry.original,   -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 2, entry.correction, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_int64(stmt, 3, Int64(weight))
+            sqlite3_bind_int64(stmt, 4, Int64(now))
+            sqlite3_bind_int64(stmt, 5, Int64(now))
+            if sqlite3_step(stmt) == SQLITE_DONE {
+                successCount += 1
+            } else if let db = db {
+                let msg = String(cString: sqlite3_errmsg(db))
+                fputs("[WordLibrary] Seed insert failed for '\(entry.original)': \(msg)\n", stderr)
+            }
+            sqlite3_finalize(stmt)
+        }
+
+        execute("COMMIT;")
+
+        UserDefaults.standard.set(true, forKey: seededKey)
+        fputs("[WordLibrary] Seeded \(successCount)/\(corrections.count) default corrections.\n", stderr)
     }
 
     // MARK: - Core SQL Helpers

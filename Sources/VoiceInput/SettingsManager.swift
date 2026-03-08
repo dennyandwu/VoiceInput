@@ -22,6 +22,10 @@ final class SettingsManager {
         static let languageMode    = "voiceinput.languageMode"      // "auto" / "zh" / "en" / "zh+en"
         static let launchAtLogin   = "voiceinput.launchAtLogin"    // Bool
         static let showNotification = "voiceinput.showNotification" // Bool
+        // LLM 后处理
+        static let llmPostProcessingEnabled = "llmPostProcessingEnabled" // Bool
+        static let llmApiKey                = "llmApiKey"                // String
+        static let llmApiBaseURL            = "llmApiBaseURL"            // String
     }
 
     private let defaults = UserDefaults.standard
@@ -41,6 +45,10 @@ final class SettingsManager {
             Keys.languageMode:     "zh+en",        // 默认中英双语
             Keys.launchAtLogin:    false,
             Keys.showNotification: true,
+            // LLM 后处理默认值
+            Keys.llmPostProcessingEnabled: false,
+            Keys.llmApiKey:                "",
+            Keys.llmApiBaseURL:            "https://api.openai.com/v1",
         ])
     }
 
@@ -246,6 +254,29 @@ final class SettingsManager {
     var showNotification: Bool {
         get { defaults.bool(forKey: Keys.showNotification) }
         set { defaults.set(newValue, forKey: Keys.showNotification) }
+    }
+
+    // MARK: - LLM 后处理
+
+    /// 是否启用 LLM 后处理
+    var llmPostProcessingEnabled: Bool {
+        get { defaults.bool(forKey: Keys.llmPostProcessingEnabled) }
+        set { defaults.set(newValue, forKey: Keys.llmPostProcessingEnabled) }
+    }
+
+    /// OpenAI API Key（或兼容 API 的密钥）
+    var llmApiKey: String {
+        get { defaults.string(forKey: Keys.llmApiKey) ?? "" }
+        set { defaults.set(newValue, forKey: Keys.llmApiKey) }
+    }
+
+    /// API Base URL，默认 https://api.openai.com/v1，支持自定义（兼容 OpenAI compatible API）
+    var llmApiBaseURL: String {
+        get {
+            let stored = defaults.string(forKey: Keys.llmApiBaseURL) ?? ""
+            return stored.isEmpty ? "https://api.openai.com/v1" : stored
+        }
+        set { defaults.set(newValue, forKey: Keys.llmApiBaseURL) }
     }
 
     // MARK: - 用户数据目录

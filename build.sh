@@ -45,6 +45,7 @@ swiftc \
   "$SOURCES_DIR/HotkeyManager.swift" \
   "$SOURCES_DIR/SettingsManager.swift" \
   "$SOURCES_DIR/WordLibraryManager.swift" \
+  "$SOURCES_DIR/LLMPostProcessor.swift" \
   "$SOURCES_DIR/PermissionManager.swift" \
   "$SOURCES_DIR/StatusBarController.swift" \
   "$SOURCES_DIR/HotkeyRecorderWindow.swift" \

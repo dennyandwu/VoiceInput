@@ -344,6 +344,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             fputs("[AppDelegate] 📚 词库修正: \"\(beforeCorrection)\" → \"\(processedText)\"\n", stderr)
         }
 
+        // LLM 后处理（可选，需用户开启 + 配置 API Key）
+        let llm = LLMPostProcessor.shared
+        if llm.isEnabled {
+            let beforeLLM = processedText
+            processedText = llm.process(processedText)
+            if processedText != beforeLLM {
+                fputs("[AppDelegate] 🤖 LLM 优化: \"\(beforeLLM)\" → \"\(processedText)\"\n", stderr)
+            }
+        }
+
         let finalText = processedText
 
         fputs("[AppDelegate] ✅ 识别结果: \"\(finalText)\" [lang=\(lang), RTF=\(String(format: "%.3f", result.processingTime / max(result.duration, 0.001)))]\n", stderr)
