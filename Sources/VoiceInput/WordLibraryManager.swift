@@ -111,10 +111,10 @@ final class WordLibraryManager {
     }
 
     private func seedDefaultCorrections() {
-        let seededKey = "WordLibrary.seeded.v1"
+        let seededKey = "WordLibrary.seeded.v2"
         guard !UserDefaults.standard.bool(forKey: seededKey) else { return }
 
-        fputs("[WordLibrary] Seeding default corrections (v1)...\n", stderr)
+        fputs("[WordLibrary] Seeding default corrections (v2)...\n", stderr)
 
         let now = Int(Date().timeIntervalSince1970)
         let weight = 10
@@ -140,15 +140,25 @@ final class WordLibraryManager {
             ("chat gpt",   "ChatGPT"),
             ("chat g p t", "ChatGPT"),
 
-            // 3. 中文填充词移除（映射为空字符串或保留标点）
+            // 3. 中文填充词移除
+            // 3a. 带标点的情况（保留标点）
             ("呃，", "，"),
             ("呃,",  ","),
             ("嗯，", "，"),
             ("嗯,",  ","),
+            ("那个那个", ""),   // 连续重复，直接删
             ("那个，", "，"),
             ("那个,",  ","),
             ("就是说，", "，"),
             ("就是说,",  ","),
+            // 3b. 无标点的情况（句首/句中连续填充词）
+            ("就是说嗯", ""),
+            ("就是说那个", ""),
+            ("就是说", ""),     // 句首常见
+            ("嗯那个", ""),
+            ("那个才", "才"),   // "那个才..." → "才..."
+            ("嗯嗯", ""),
+            ("呃呃", ""),
 
             // 4. 常见中文 ASR 错误
             ("因该", "应该"),
@@ -220,13 +230,16 @@ final class WordLibraryManager {
 
     // MARK: - Public: Corrections
 
-    /// 对识别结果应用词库修正（按 weight DESC 排序，避免短词替换冲突）
+    /// 对识别结果应用词库修正（长词优先替换，避免短词破坏长词匹配）
     func applyCorrections(to text: String) -> String {
         lock.lock()
         defer { lock.unlock() }
 
-        let corrections = fetchAllCorrectionsInternal()
+        var corrections = fetchAllCorrectionsInternal()
         guard !corrections.isEmpty else { return text }
+
+        // 按 original 长度降序排序（长词优先替换）
+        corrections.sort { $0.original.count > $1.original.count }
 
         var result = text
         for (original, correction, _) in corrections {
