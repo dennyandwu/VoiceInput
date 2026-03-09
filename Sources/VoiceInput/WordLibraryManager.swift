@@ -111,7 +111,7 @@ final class WordLibraryManager {
     }
 
     private func seedDefaultCorrections() {
-        let seededKey = "WordLibrary.seeded.v2"
+        let seededKey = "WordLibrary.seeded.v3"
         guard !UserDefaults.standard.bool(forKey: seededKey) else { return }
 
         fputs("[WordLibrary] Seeding default corrections (v2)...\n", stderr)
@@ -139,6 +139,10 @@ final class WordLibraryManager {
             ("voice input", "VoiceInput"),
             ("chat gpt",   "ChatGPT"),
             ("chat g p t", "ChatGPT"),
+            ("deep seek",  "DeepSeek"),
+            ("deeps",      "DeepSeek"),
+            ("deepseek",   "DeepSeek"),
+            ("deep sick",  "DeepSeek"),
 
             // 3. 中文填充词移除
             // 3a. 带标点的情况（保留标点）

@@ -38,7 +38,12 @@ final class LLMPostProcessor {
     private let minTextLength = 5
 
     private let systemPrompt = """
-你是语音识别后处理助手。优化以下语音识别文本：1) 删除填充词（呃、嗯、那个、就是说）2) 修正明显错别字 3) 规范标点符号。保持原意不变，不要添加内容。只输出优化后的文本，不要解释。
+你是语音识别(ASR)后处理助手。输入是 ASR 原始输出，可能包含错误。请执行：
+1) 删除口语填充词（呃、嗯、那个、就是说、然后、对对对、是的是的）
+2) 修正 ASR 常见错误：音近字替换、英文单词拼写错误、品牌名纠正（如 deeps/deep seek→DeepSeek, open claw→OpenClaw, chat gpt→ChatGPT）
+3) 修正标点符号
+4) 不改变原意，不添加内容，不翻译
+只输出修正后的纯文本，不要任何解释或引号。
 """
 
     // MARK: - Public API
@@ -67,6 +72,13 @@ final class LLMPostProcessor {
             let elapsed = Date().timeIntervalSince(startTime)
             fputs("[LLM] ⚠️ 超时（\(String(format: "%.2f", elapsed))s），返回原文\n", stderr)
             return text
+        }
+
+        // 对比日志
+        if result != text {
+            fputs("[LLM] 修正: \"\(text)\" → \"\(result)\"\n", stderr)
+        } else {
+            fputs("[LLM] 无变化: \"\(text)\"\n", stderr)
         }
 
         return result
