@@ -34,7 +34,16 @@ final class LLMPostProcessor {
 
     // MARK: - Constants
 
-    private let timeoutSeconds: TimeInterval = 2.0
+    private let timeoutSeconds: TimeInterval = 4.0
+
+    // MARK: - Shared URLSession（连接复用，避免重复 TLS 握手）
+    private lazy var session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = timeoutSeconds + 1
+        config.timeoutIntervalForResource = timeoutSeconds + 2
+        config.httpMaximumConnectionsPerHost = 2
+        return URLSession(configuration: config)
+    }()
     private let minTextLength = 5
 
     private let systemPrompt = """
@@ -123,7 +132,7 @@ final class LLMPostProcessor {
                 ["role": "user",   "content": text]
             ],
             "temperature": 0.1,
-            "max_tokens": 500
+            "max_tokens": 200
         ]
 
         guard let bodyData = try? JSONSerialization.data(withJSONObject: requestBody) else {
@@ -139,7 +148,6 @@ final class LLMPostProcessor {
         request.httpBody = bodyData
         request.timeoutInterval = timeoutSeconds
 
-        let session = URLSession(configuration: .ephemeral)
         let task = session.dataTask(with: request) { data, response, error in
             let elapsed = Date().timeIntervalSince(startTime)
 
