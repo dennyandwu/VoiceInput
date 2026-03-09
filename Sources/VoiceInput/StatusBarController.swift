@@ -393,17 +393,10 @@ final class StatusBarController {
         presetsTitle.isEnabled = false
         llmMenu.addItem(presetsTitle)
 
-        let geminiPreset = NSMenuItem(title: "🔷 Gemini（免费推荐）", action: #selector(presetGemini), keyEquivalent: "")
-        geminiPreset.target = self
-        llmMenu.addItem(geminiPreset)
-
-        let openaiPreset = NSMenuItem(title: "🟢 OpenAI", action: #selector(presetOpenAI), keyEquivalent: "")
-        openaiPreset.target = self
-        llmMenu.addItem(openaiPreset)
-
-        let groqPreset = NSMenuItem(title: "🟠 Groq（免费额度）", action: #selector(presetGroq), keyEquivalent: "")
-        groqPreset.target = self
-        llmMenu.addItem(groqPreset)
+        // 云端预设
+        let cloudTitle = NSMenuItem(title: "── 云端 API ──", action: nil, keyEquivalent: "")
+        cloudTitle.isEnabled = false
+        llmMenu.addItem(cloudTitle)
 
         let deepseekPreset = NSMenuItem(title: "🇨🇳 DeepSeek（国内直连）", action: #selector(presetDeepSeek), keyEquivalent: "")
         deepseekPreset.target = self
@@ -412,6 +405,39 @@ final class StatusBarController {
         let qwenPreset = NSMenuItem(title: "🇨🇳 通义千问（免费额度）", action: #selector(presetQwen), keyEquivalent: "")
         qwenPreset.target = self
         llmMenu.addItem(qwenPreset)
+
+        let geminiPreset = NSMenuItem(title: "🔷 Gemini（需科学上网）", action: #selector(presetGemini), keyEquivalent: "")
+        geminiPreset.target = self
+        llmMenu.addItem(geminiPreset)
+
+        let openaiPreset = NSMenuItem(title: "🟢 OpenAI（需科学上网）", action: #selector(presetOpenAI), keyEquivalent: "")
+        openaiPreset.target = self
+        llmMenu.addItem(openaiPreset)
+
+        let groqPreset = NSMenuItem(title: "🟠 Groq（需科学上网）", action: #selector(presetGroq), keyEquivalent: "")
+        groqPreset.target = self
+        llmMenu.addItem(groqPreset)
+
+        // 本地 Ollama 预设
+        let localTitle = NSMenuItem(title: "── 本地 Ollama ──", action: nil, keyEquivalent: "")
+        localTitle.isEnabled = false
+        llmMenu.addItem(localTitle)
+
+        let ollama3b = NSMenuItem(title: "🖥️ Qwen2.5-3B（极速，2GB）", action: #selector(presetOllama3B), keyEquivalent: "")
+        ollama3b.target = self
+        llmMenu.addItem(ollama3b)
+
+        let ollama7b = NSMenuItem(title: "🖥️ Qwen2.5-7B（推荐，5GB）", action: #selector(presetOllama7B), keyEquivalent: "")
+        ollama7b.target = self
+        llmMenu.addItem(ollama7b)
+
+        let ollama14b = NSMenuItem(title: "🖥️ Qwen2.5-14B（高质量，9GB）", action: #selector(presetOllama14B), keyEquivalent: "")
+        ollama14b.target = self
+        llmMenu.addItem(ollama14b)
+
+        let ollama32b = NSMenuItem(title: "🖥️ Qwen2.5-32B（最强，20GB）", action: #selector(presetOllama32B), keyEquivalent: "")
+        ollama32b.target = self
+        llmMenu.addItem(ollama32b)
 
         let llmItem = NSMenuItem(title: llmStatusText, action: nil, keyEquivalent: "")
         llmItem.submenu = llmMenu
@@ -635,6 +661,70 @@ final class StatusBarController {
         settings.llmPostProcessingEnabled = true
         fputs("[StatusBar] 预设: 通义千问 Qwen-Turbo\n", stderr)
         if settings.llmApiKey.isEmpty { setLLMApiKey() }
+    }
+
+    // MARK: - Ollama Presets
+
+    private func applyOllamaPreset(model: String, label: String) {
+        settings.llmApiBaseURL = "http://localhost:11434/v1"
+        settings.llmModel = model
+        settings.llmApiKey = "ollama"  // Ollama 不校验 key，但字段不能为空
+        settings.llmPostProcessingEnabled = true
+        fputs("[StatusBar] 预设: 本地 Ollama \(label)\n", stderr)
+
+        // 检测 Ollama 是否运行
+        DispatchQueue.global().async {
+            let url = URL(string: "http://localhost:11434/api/tags")!
+            let task = URLSession.shared.dataTask(with: url) { data, response, error in
+                if let error = error {
+                    DispatchQueue.main.async {
+                        let alert = NSAlert()
+                        alert.messageText = "Ollama 未运行"
+                        alert.informativeText = "请先启动 Ollama 并拉取模型：\n\n1. 启动 Ollama.app\n2. 终端运行：ollama pull \(model)\n3. 等待下载完成后重试"
+                        alert.alertStyle = .warning
+                        alert.addButton(withTitle: "好的")
+                        NSApp.activate(ignoringOtherApps: true)
+                        alert.runModal()
+                    }
+                    return
+                }
+                // 检查模型是否已下载
+                if let data = data,
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let models = json["models"] as? [[String: Any]] {
+                    let modelNames = models.compactMap { $0["name"] as? String }
+                    let hasModel = modelNames.contains { $0.hasPrefix(model.replacingOccurrences(of: ":", with: ":")) }
+                    if !hasModel {
+                        DispatchQueue.main.async {
+                            let alert = NSAlert()
+                            alert.messageText = "模型未下载"
+                            alert.informativeText = "Ollama 已运行，但模型 \(model) 尚未下载。\n\n请在终端运行：\n  ollama pull \(model)\n\n已安装的模型：\n\(modelNames.joined(separator: "\n"))"
+                            alert.alertStyle = .informational
+                            alert.addButton(withTitle: "好的")
+                            NSApp.activate(ignoringOtherApps: true)
+                            alert.runModal()
+                        }
+                    }
+                }
+            }
+            task.resume()
+        }
+    }
+
+    @objc private func presetOllama3B() {
+        applyOllamaPreset(model: "qwen2.5:3b", label: "Qwen2.5-3B (极速)")
+    }
+
+    @objc private func presetOllama7B() {
+        applyOllamaPreset(model: "qwen2.5:7b", label: "Qwen2.5-7B (推荐)")
+    }
+
+    @objc private func presetOllama14B() {
+        applyOllamaPreset(model: "qwen2.5:14b", label: "Qwen2.5-14B (高质量)")
+    }
+
+    @objc private func presetOllama32B() {
+        applyOllamaPreset(model: "qwen2.5:32b", label: "Qwen2.5-32B (最强)")
     }
 
     @objc private func checkUpdate() {
