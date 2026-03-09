@@ -95,8 +95,11 @@ success "DMG 上传完成"
 
 # ─── 步骤 5: 验证上传完整性 ─────────────────────────────────────────────────
 info "步骤 5/5: 验证 GitHub Release 完整性..."
+info "  等待 GitHub 处理（15s）..."
+sleep 15
 
-REMOTE_SIZE=$(gh release view "$VERSION" --json assets --jq '.assets[0].size' 2>/dev/null || echo "0")
+# 用 gh api 直接查（避免 gh release view 缓存）
+REMOTE_SIZE=$(gh api "repos/dennyandwu/VoiceInput/releases/tags/$VERSION" --jq '.assets[0].size' 2>/dev/null || echo "0")
 REMOTE_SIZE_MB=$((REMOTE_SIZE / 1024 / 1024))
 
 echo ""
