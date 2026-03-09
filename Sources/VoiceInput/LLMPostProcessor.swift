@@ -21,6 +21,9 @@ final class LLMPostProcessor {
     /// API Key（从 SettingsManager 读取）
     var apiKey: String { SettingsManager.shared.llmApiKey }
 
+    /// API Model（从 SettingsManager 读取）
+    var apiModel: String { SettingsManager.shared.llmModel }
+
     /// API Base URL（支持自定义，兼容 OpenAI compatible API）
     var apiBaseURL: String { SettingsManager.shared.llmApiBaseURL }
 
@@ -102,7 +105,7 @@ final class LLMPostProcessor {
 
         // 构建请求体
         let requestBody: [String: Any] = [
-            "model": "gpt-4o-mini",
+            "model": apiModel,
             "messages": [
                 ["role": "system", "content": systemPrompt],
                 ["role": "user",   "content": text]

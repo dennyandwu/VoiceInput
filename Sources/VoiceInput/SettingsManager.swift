@@ -26,6 +26,7 @@ final class SettingsManager {
         static let llmPostProcessingEnabled = "llmPostProcessingEnabled" // Bool
         static let llmApiKey                = "llmApiKey"                // String
         static let llmApiBaseURL            = "llmApiBaseURL"            // String
+        static let llmModel                 = "llmModel"                 // String
     }
 
     private let defaults = UserDefaults.standard
@@ -49,6 +50,7 @@ final class SettingsManager {
             Keys.llmPostProcessingEnabled: false,
             Keys.llmApiKey:                "",
             Keys.llmApiBaseURL:            "https://api.openai.com/v1",
+            Keys.llmModel:                 "gpt-4o-mini",
         ])
     }
 
@@ -277,6 +279,15 @@ final class SettingsManager {
             return stored.isEmpty ? "https://api.openai.com/v1" : stored
         }
         set { defaults.set(newValue, forKey: Keys.llmApiBaseURL) }
+    }
+
+    /// LLM 模型名，默认 gpt-4o-mini
+    var llmModel: String {
+        get {
+            let stored = defaults.string(forKey: Keys.llmModel) ?? ""
+            return stored.isEmpty ? "gpt-4o-mini" : stored
+        }
+        set { defaults.set(newValue, forKey: Keys.llmModel) }
     }
 
     // MARK: - 用户数据目录

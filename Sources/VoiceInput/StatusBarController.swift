@@ -373,6 +373,38 @@ final class StatusBarController {
         setApiBaseItem.target = self
         llmMenu.addItem(setApiBaseItem)
 
+        llmMenu.addItem(.separator())
+
+        let llmModelItem = NSMenuItem(title: "模型: \(settings.llmModel)", action: nil, keyEquivalent: "")
+        llmMenu.addItem(llmModelItem)
+
+        let setModelItem = NSMenuItem(
+            title: "设置模型名...",
+            action: #selector(setLLMModel),
+            keyEquivalent: ""
+        )
+        setModelItem.target = self
+        llmMenu.addItem(setModelItem)
+
+        llmMenu.addItem(.separator())
+
+        // 预设方案
+        let presetsTitle = NSMenuItem(title: "── 快速预设 ──", action: nil, keyEquivalent: "")
+        presetsTitle.isEnabled = false
+        llmMenu.addItem(presetsTitle)
+
+        let geminiPreset = NSMenuItem(title: "🔷 Gemini（免费推荐）", action: #selector(presetGemini), keyEquivalent: "")
+        geminiPreset.target = self
+        llmMenu.addItem(geminiPreset)
+
+        let openaiPreset = NSMenuItem(title: "🟢 OpenAI", action: #selector(presetOpenAI), keyEquivalent: "")
+        openaiPreset.target = self
+        llmMenu.addItem(openaiPreset)
+
+        let groqPreset = NSMenuItem(title: "🟠 Groq（免费额度）", action: #selector(presetGroq), keyEquivalent: "")
+        groqPreset.target = self
+        llmMenu.addItem(groqPreset)
+
         let llmItem = NSMenuItem(title: llmStatusText, action: nil, keyEquivalent: "")
         llmItem.submenu = llmMenu
         menu.addItem(llmItem)
@@ -509,7 +541,7 @@ final class StatusBarController {
         DispatchQueue.main.async { [weak self] in
             let alert = NSAlert()
             alert.messageText = "设置 API 地址"
-            alert.informativeText = "自定义 API 地址（兼容 OpenAI 接口）。\n留空使用默认 OpenAI 地址。\n\n示例：\nhttps://api.deepseek.com/v1\nhttps://api.groq.com/openai/v1"
+            alert.informativeText = "自定义 API 地址（兼容 OpenAI 接口）。\n留空使用默认 OpenAI 地址。\n\n示例：\nhttps://generativelanguage.googleapis.com/v1beta/openai (Gemini)\nhttps://api.groq.com/openai/v1 (Groq)\nhttps://api.deepseek.com/v1 (DeepSeek)"
             alert.alertStyle = .informational
             alert.addButton(withTitle: "保存")
             alert.addButton(withTitle: "取消")
@@ -527,6 +559,58 @@ final class StatusBarController {
                 fputs("[StatusBar] API 地址: \(url.isEmpty ? "默认 (OpenAI)" : url)\n", stderr)
             }
         }
+    }
+
+    @objc private func setLLMModel() {
+        DispatchQueue.main.async { [weak self] in
+            let alert = NSAlert()
+            alert.messageText = "设置 AI 模型"
+            alert.informativeText = "输入模型名称。常用模型：\n\n• gpt-4o-mini (OpenAI, 推荐)\n• gemini-2.0-flash (Google, 免费)\n• llama-3.3-70b-versatile (Groq)\n• deepseek-chat (DeepSeek)"
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "保存")
+            alert.addButton(withTitle: "取消")
+
+            let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
+            input.stringValue = self?.settings.llmModel ?? "gpt-4o-mini"
+            input.placeholderString = "gpt-4o-mini"
+            alert.accessoryView = input
+
+            NSApp.activate(ignoringOtherApps: true)
+            let response = alert.runModal()
+            if response == .alertFirstButtonReturn {
+                let model = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !model.isEmpty {
+                    self?.settings.llmModel = model
+                    fputs("[StatusBar] LLM 模型: \(model)\n", stderr)
+                }
+            }
+        }
+    }
+
+    // MARK: - LLM Presets
+
+    @objc private func presetGemini() {
+        settings.llmApiBaseURL = "https://generativelanguage.googleapis.com/v1beta/openai"
+        settings.llmModel = "gemini-2.0-flash"
+        settings.llmPostProcessingEnabled = true
+        fputs("[StatusBar] 预设: Gemini Flash (免费)\n", stderr)
+        if settings.llmApiKey.isEmpty { setLLMApiKey() }
+    }
+
+    @objc private func presetOpenAI() {
+        settings.llmApiBaseURL = "https://api.openai.com/v1"
+        settings.llmModel = "gpt-4o-mini"
+        settings.llmPostProcessingEnabled = true
+        fputs("[StatusBar] 预设: OpenAI gpt-4o-mini\n", stderr)
+        if settings.llmApiKey.isEmpty { setLLMApiKey() }
+    }
+
+    @objc private func presetGroq() {
+        settings.llmApiBaseURL = "https://api.groq.com/openai/v1"
+        settings.llmModel = "llama-3.3-70b-versatile"
+        settings.llmPostProcessingEnabled = true
+        fputs("[StatusBar] 预设: Groq Llama-3.3-70B\n", stderr)
+        if settings.llmApiKey.isEmpty { setLLMApiKey() }
     }
 
     @objc private func checkUpdate() {
