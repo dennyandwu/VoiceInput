@@ -84,16 +84,51 @@ struct TextPostProcessor {
 
     /// 检查检测到的语言是否在白名单内
     /// 如果不在白名单，尝试将结果映射到最可能的白名单语言
+    /// 即使检测语言在白名单中，也会清理不属于白名单语言的字符（如日语假名混入中文）
     static func filterByLanguage(_ text: String, detectedLang: String, allowed: Set<String>) -> (text: String, lang: String) {
-        // 如果在白名单内，直接返回
-        if allowed.contains(detectedLang) {
-            return (text, detectedLang)
+
+        // 无论检测语言是否在白名单中，都清理不属于白名单语言的字符
+        var cleanedText = text
+
+        // 日语假名清理（当 "ja" 不在白名单中）
+        if !allowed.contains("ja") {
+            let beforeClean = cleanedText
+            // 移除平假名 U+3040-U+309F 和片假名 U+30A0-U+30FF
+            cleanedText = String(cleanedText.unicodeScalars.filter { scalar in
+                !((0x3040...0x309F).contains(scalar.value) ||
+                  (0x30A0...0x30FF).contains(scalar.value))
+            })
+            if cleanedText != beforeClean {
+                fputs("[PostProcessor] 清理日语假名: \"\(beforeClean)\" → \"\(cleanedText)\"\n", stderr)
+            }
         }
 
-        // 检查文本是否包含日文假名（平假名/片假名）
-        // 如果包含，说明模型真的输出了日语，不是中文被误标
-        let hasJapaneseKana = text.unicodeScalars.contains { scalar in
-            // 平假名 U+3040-U+309F, 片假名 U+30A0-U+30FF
+        // 韩文清理（当 "ko" 不在白名单中）
+        if !allowed.contains("ko") {
+            let beforeClean = cleanedText
+            cleanedText = String(cleanedText.unicodeScalars.filter { scalar in
+                !(0xAC00...0xD7AF).contains(scalar.value)
+            })
+            if cleanedText != beforeClean {
+                fputs("[PostProcessor] 清理韩文字符: \"\(beforeClean)\" → \"\(cleanedText)\"\n", stderr)
+            }
+        }
+
+        cleanedText = cleanedText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // 清理后为空，说明整段都是非白名单语言
+        if cleanedText.isEmpty {
+            fputs("[PostProcessor] 清理后文本为空，丢弃\n", stderr)
+            return ("", detectedLang)
+        }
+
+        // 如果在白名单内，返回清理后的文本
+        if allowed.contains(detectedLang) {
+            return (cleanedText, detectedLang)
+        }
+
+        // 以下处理检测语言不在白名单的情况
+        let hasJapaneseKana = cleanedText.unicodeScalars.contains { scalar in
             (0x3040...0x309F).contains(scalar.value) ||
             (0x30A0...0x30FF).contains(scalar.value)
         }
@@ -106,31 +141,30 @@ struct TextPostProcessor {
         // 日语误判处理：文本是汉字（中日共享），重映射为中文
         if detectedLang == "ja" && allowed.contains("zh") {
             fputs("[PostProcessor] 语言重映射: ja → zh（纯汉字内容）\n", stderr)
-            return (text, "zh")
+            return (cleanedText, "zh")
         }
 
         // 粤语误判处理
         if detectedLang == "yue" && allowed.contains("zh") {
             fputs("[PostProcessor] 语言重映射: yue → zh\n", stderr)
-            return (text, "zh")
+            return (cleanedText, "zh")
         }
 
         // 韩语误判处理
         if detectedLang == "ko" && !allowed.contains("ko") {
-            // 检查是否包含韩文字符
-            let hasKorean = text.unicodeScalars.contains { (0xAC00...0xD7AF).contains($0.value) }
+            let hasKorean = cleanedText.unicodeScalars.contains { (0xAC00...0xD7AF).contains($0.value) }
             if hasKorean {
                 fputs("[PostProcessor] 检测到韩文字符，结果无效，丢弃\n", stderr)
                 return ("", detectedLang)
             }
             let fallback = allowed.contains("zh") ? "zh" : (allowed.first ?? "en")
-            return (text, fallback)
+            return (cleanedText, fallback)
         }
 
         // 其他情况
         let fallback = allowed.contains("zh") ? "zh" : (allowed.first ?? "en")
         fputs("[PostProcessor] 语言重映射: \(detectedLang) → \(fallback)\n", stderr)
-        return (text, fallback)
+        return (cleanedText, fallback)
     }
 
     // MARK: - Phase 3: 中英混合增强
