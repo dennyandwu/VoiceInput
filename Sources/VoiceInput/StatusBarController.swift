@@ -328,6 +328,57 @@ final class StatusBarController {
 
         menu.addItem(.separator())
 
+        // ─── AI 优化（LLM 后处理）─────────────────────────
+        let llmEnabled = settings.llmPostProcessingEnabled && !settings.llmApiKey.isEmpty
+        let llmStatusText = llmEnabled ? "✅ AI 优化已启用" : "AI 优化（去填充词/纠错）"
+
+        let llmMenu = NSMenu()
+
+        let llmToggleItem = NSMenuItem(
+            title: settings.llmPostProcessingEnabled ? "关闭 AI 优化" : "开启 AI 优化",
+            action: #selector(toggleLLM),
+            keyEquivalent: ""
+        )
+        llmToggleItem.target = self
+        llmMenu.addItem(llmToggleItem)
+
+        llmMenu.addItem(.separator())
+
+        let apiKeyStatus = settings.llmApiKey.isEmpty ? "❌ 未设置" : "✅ 已设置 (\(String(settings.llmApiKey.prefix(8)))...)"
+        let apiKeyItem = NSMenuItem(title: "API Key: \(apiKeyStatus)", action: nil, keyEquivalent: "")
+        llmMenu.addItem(apiKeyItem)
+
+        let setApiKeyItem = NSMenuItem(
+            title: "设置 API Key...",
+            action: #selector(setLLMApiKey),
+            keyEquivalent: ""
+        )
+        setApiKeyItem.target = self
+        llmMenu.addItem(setApiKeyItem)
+
+        llmMenu.addItem(.separator())
+
+        let apiBaseItem = NSMenuItem(
+            title: "API: \(settings.llmApiBaseURL.isEmpty ? "api.openai.com" : settings.llmApiBaseURL)",
+            action: nil,
+            keyEquivalent: ""
+        )
+        llmMenu.addItem(apiBaseItem)
+
+        let setApiBaseItem = NSMenuItem(
+            title: "设置 API 地址...",
+            action: #selector(setLLMApiBase),
+            keyEquivalent: ""
+        )
+        setApiBaseItem.target = self
+        llmMenu.addItem(setApiBaseItem)
+
+        let llmItem = NSMenuItem(title: llmStatusText, action: nil, keyEquivalent: "")
+        llmItem.submenu = llmMenu
+        menu.addItem(llmItem)
+
+        menu.addItem(.separator())
+
         // ─── 检查更新 ─────────────────────────────────────
         let updateItem = NSMenuItem(
             title: "检查更新...",
@@ -412,6 +463,70 @@ final class StatusBarController {
 
     @objc private func changeHotkey() {
         onHotkeyRecordRequested?()
+    }
+
+    // MARK: - LLM Settings Actions
+
+    @objc private func toggleLLM() {
+        settings.llmPostProcessingEnabled = !settings.llmPostProcessingEnabled
+        let state = settings.llmPostProcessingEnabled ? "开启" : "关闭"
+        fputs("[StatusBar] AI 优化: \(state)\n", stderr)
+
+        if settings.llmPostProcessingEnabled && settings.llmApiKey.isEmpty {
+            // 开启但没有 API Key，提示设置
+            setLLMApiKey()
+        }
+    }
+
+    @objc private func setLLMApiKey() {
+        DispatchQueue.main.async { [weak self] in
+            let alert = NSAlert()
+            alert.messageText = "设置 OpenAI API Key"
+            alert.informativeText = "输入 API Key 以启用 AI 文本优化功能。\n支持 OpenAI 或兼容 API（如 DeepSeek、Groq）。\n\n留空则关闭 AI 优化。"
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "保存")
+            alert.addButton(withTitle: "取消")
+
+            let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
+            input.stringValue = self?.settings.llmApiKey ?? ""
+            input.placeholderString = "sk-..."
+            alert.accessoryView = input
+
+            NSApp.activate(ignoringOtherApps: true)
+            let response = alert.runModal()
+            if response == .alertFirstButtonReturn {
+                let key = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                self?.settings.llmApiKey = key
+                if !key.isEmpty {
+                    self?.settings.llmPostProcessingEnabled = true
+                }
+                fputs("[StatusBar] API Key \(key.isEmpty ? "已清除" : "已设置")\n", stderr)
+            }
+        }
+    }
+
+    @objc private func setLLMApiBase() {
+        DispatchQueue.main.async { [weak self] in
+            let alert = NSAlert()
+            alert.messageText = "设置 API 地址"
+            alert.informativeText = "自定义 API 地址（兼容 OpenAI 接口）。\n留空使用默认 OpenAI 地址。\n\n示例：\nhttps://api.deepseek.com/v1\nhttps://api.groq.com/openai/v1"
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "保存")
+            alert.addButton(withTitle: "取消")
+
+            let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
+            input.stringValue = self?.settings.llmApiBaseURL ?? ""
+            input.placeholderString = "https://api.openai.com/v1"
+            alert.accessoryView = input
+
+            NSApp.activate(ignoringOtherApps: true)
+            let response = alert.runModal()
+            if response == .alertFirstButtonReturn {
+                let url = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                self?.settings.llmApiBaseURL = url
+                fputs("[StatusBar] API 地址: \(url.isEmpty ? "默认 (OpenAI)" : url)\n", stderr)
+            }
+        }
     }
 
     @objc private func checkUpdate() {
