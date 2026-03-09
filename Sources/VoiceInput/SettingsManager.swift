@@ -27,7 +27,32 @@ final class SettingsManager {
         static let llmApiKey                = "llmApiKey"                // String
         static let llmApiBaseURL            = "llmApiBaseURL"            // String
         static let llmModel                 = "llmModel"                 // String
+        static let llmActivePreset          = "llmActivePreset"          // String
     }
+
+    // MARK: - LLM 预设定义
+
+    struct LLMPreset {
+        let id: String
+        let name: String
+        let defaultBaseURL: String
+        let defaultModel: String
+        let needsApiKey: Bool  // Ollama 不需要
+    }
+
+    static let llmPresets: [LLMPreset] = [
+        // 云端
+        LLMPreset(id: "deepseek",  name: "DeepSeek",    defaultBaseURL: "https://api.deepseek.com",       defaultModel: "deepseek-chat",     needsApiKey: true),
+        LLMPreset(id: "qwen",      name: "通义千问",     defaultBaseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1", defaultModel: "qwen-turbo", needsApiKey: true),
+        LLMPreset(id: "gemini",    name: "Gemini",      defaultBaseURL: "https://generativelanguage.googleapis.com/v1beta/openai", defaultModel: "gemini-2.0-flash", needsApiKey: true),
+        LLMPreset(id: "openai",    name: "OpenAI",      defaultBaseURL: "https://api.openai.com/v1",      defaultModel: "gpt-4o-mini",       needsApiKey: true),
+        LLMPreset(id: "groq",      name: "Groq",        defaultBaseURL: "https://api.groq.com/openai/v1", defaultModel: "llama-3.3-70b-versatile", needsApiKey: true),
+        // 本地 Ollama
+        LLMPreset(id: "ollama-3b",  name: "Ollama Qwen2.5-3B",  defaultBaseURL: "http://localhost:11434/v1", defaultModel: "qwen2.5:3b",  needsApiKey: false),
+        LLMPreset(id: "ollama-7b",  name: "Ollama Qwen2.5-7B",  defaultBaseURL: "http://localhost:11434/v1", defaultModel: "qwen2.5:7b",  needsApiKey: false),
+        LLMPreset(id: "ollama-14b", name: "Ollama Qwen2.5-14B", defaultBaseURL: "http://localhost:11434/v1", defaultModel: "qwen2.5:14b", needsApiKey: false),
+        LLMPreset(id: "ollama-32b", name: "Ollama Qwen2.5-32B", defaultBaseURL: "http://localhost:11434/v1", defaultModel: "qwen2.5:32b", needsApiKey: false),
+    ]
 
     private let defaults = UserDefaults.standard
 
@@ -288,6 +313,67 @@ final class SettingsManager {
             return stored.isEmpty ? "gpt-4o-mini" : stored
         }
         set { defaults.set(newValue, forKey: Keys.llmModel) }
+    }
+
+    /// 当前激活的预设 ID
+    var llmActivePreset: String {
+        get { defaults.string(forKey: Keys.llmActivePreset) ?? "" }
+        set { defaults.set(newValue, forKey: Keys.llmActivePreset) }
+    }
+
+    // MARK: - 预设配置存取
+
+    /// 保存当前配置到指定预设
+    func saveCurrentToPreset(_ presetId: String) {
+        let prefix = "llm.preset.\(presetId)"
+        defaults.set(llmApiKey, forKey: "\(prefix).apiKey")
+        defaults.set(llmApiBaseURL, forKey: "\(prefix).baseURL")
+        defaults.set(llmModel, forKey: "\(prefix).model")
+        llmActivePreset = presetId
+        fputs("[Settings] 保存预设 \(presetId): model=\(llmModel), baseURL=\(llmApiBaseURL)\n", stderr)
+    }
+
+    /// 加载预设配置（如果之前保存过，恢复用户的自定义值）
+    func loadPreset(_ presetId: String) {
+        let prefix = "llm.preset.\(presetId)"
+
+        // 先保存当前预设（如果有活动预设）
+        let currentPreset = llmActivePreset
+        if !currentPreset.isEmpty {
+            saveCurrentToPreset(currentPreset)
+        }
+
+        // 查找预设定义
+        guard let preset = Self.llmPresets.first(where: { $0.id == presetId }) else {
+            fputs("[Settings] 未知预设: \(presetId)\n", stderr)
+            return
+        }
+
+        // 加载保存的配置，没保存过则用默认值
+        let savedKey = defaults.string(forKey: "\(prefix).apiKey") ?? ""
+        let savedURL = defaults.string(forKey: "\(prefix).baseURL") ?? ""
+        let savedModel = defaults.string(forKey: "\(prefix).model") ?? ""
+
+        llmApiBaseURL = savedURL.isEmpty ? preset.defaultBaseURL : savedURL
+        llmModel = savedModel.isEmpty ? preset.defaultModel : savedModel
+
+        if !savedKey.isEmpty {
+            llmApiKey = savedKey
+        } else if !preset.needsApiKey {
+            llmApiKey = "ollama"
+        }
+        // 如果需要 API Key 且没保存过，不清空当前 key（留给调用方处理）
+
+        llmPostProcessingEnabled = true
+        llmActivePreset = presetId
+
+        fputs("[Settings] 加载预设 \(presetId) (\(preset.name)): model=\(llmModel), baseURL=\(llmApiBaseURL), hasKey=\(!llmApiKey.isEmpty)\n", stderr)
+    }
+
+    /// 获取预设已保存的 API Key（用于菜单显示）
+    func presetHasApiKey(_ presetId: String) -> Bool {
+        let key = defaults.string(forKey: "llm.preset.\(presetId).apiKey") ?? ""
+        return !key.isEmpty
     }
 
     // MARK: - 用户数据目录
