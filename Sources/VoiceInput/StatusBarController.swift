@@ -405,6 +405,14 @@ final class StatusBarController {
         groqPreset.target = self
         llmMenu.addItem(groqPreset)
 
+        let deepseekPreset = NSMenuItem(title: "🇨🇳 DeepSeek（国内直连）", action: #selector(presetDeepSeek), keyEquivalent: "")
+        deepseekPreset.target = self
+        llmMenu.addItem(deepseekPreset)
+
+        let qwenPreset = NSMenuItem(title: "🇨🇳 通义千问（免费额度）", action: #selector(presetQwen), keyEquivalent: "")
+        qwenPreset.target = self
+        llmMenu.addItem(qwenPreset)
+
         let llmItem = NSMenuItem(title: llmStatusText, action: nil, keyEquivalent: "")
         llmItem.submenu = llmMenu
         menu.addItem(llmItem)
@@ -610,6 +618,22 @@ final class StatusBarController {
         settings.llmModel = "llama-3.3-70b-versatile"
         settings.llmPostProcessingEnabled = true
         fputs("[StatusBar] 预设: Groq Llama-3.3-70B\n", stderr)
+        if settings.llmApiKey.isEmpty { setLLMApiKey() }
+    }
+
+    @objc private func presetDeepSeek() {
+        settings.llmApiBaseURL = "https://api.deepseek.com"
+        settings.llmModel = "deepseek-chat"
+        settings.llmPostProcessingEnabled = true
+        fputs("[StatusBar] 预设: DeepSeek (国内直连)\n", stderr)
+        if settings.llmApiKey.isEmpty { setLLMApiKey() }
+    }
+
+    @objc private func presetQwen() {
+        settings.llmApiBaseURL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        settings.llmModel = "qwen-turbo"
+        settings.llmPostProcessingEnabled = true
+        fputs("[StatusBar] 预设: 通义千问 Qwen-Turbo\n", stderr)
         if settings.llmApiKey.isEmpty { setLLMApiKey() }
     }
 
