@@ -540,38 +540,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Whisper 英文增强引擎
 
-    /// Whisper small 模型下载 URL（sherpa-onnx 预转换）
-    private static let whisperModelURL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-small.en.tar.bz2"
-
     /// 尝试加载 Whisper 模型（如果已下载）
     private func tryLoadWhisper(engine: SpeechEngine) {
+        let model = settings.whisperModel
         let whisperDir = SettingsManager.whisperModelDir
-        let encoderPath = (whisperDir as NSString).appendingPathComponent("small.en-encoder.int8.onnx")
-        let decoderPath = (whisperDir as NSString).appendingPathComponent("small.en-decoder.int8.onnx")
-        let tokensPath = (whisperDir as NSString).appendingPathComponent("small.en-tokens.txt")
+        let encoderPath = (whisperDir as NSString).appendingPathComponent(model.encoderFile)
+        let decoderPath = (whisperDir as NSString).appendingPathComponent(model.decoderFile)
+        let tokensPath = (whisperDir as NSString).appendingPathComponent(model.tokensFile)
 
         guard FileManager.default.fileExists(atPath: encoderPath) else {
-            fputs("[AppDelegate] Whisper 模型未安装（菜单可下载）\n", stderr)
+            fputs("[AppDelegate] Whisper \(model.rawValue) 模型未安装（菜单可下载）\n", stderr)
             return
         }
 
         pipelineQueue.async {
             let success = engine.loadWhisper(encoderPath: encoderPath, decoderPath: decoderPath, tokensPath: tokensPath)
             if success {
-                fputs("[AppDelegate] ✅ Whisper 英文增强已启用\n", stderr)
+                fputs("[AppDelegate] ✅ Whisper \(model.rawValue) 已启用\n", stderr)
             }
         }
     }
 
     /// 下载 Whisper 模型
     private func downloadWhisperModel() {
+        let model = settings.whisperModel
         let alert = NSAlert()
-        alert.messageText = "下载 Whisper 英文增强模型"
+        alert.messageText = "下载 Whisper 模型"
         alert.informativeText = """
-        Whisper Small（英文专用，约 200MB）可大幅提升英文识别准确率。
+        \(model.displayName)
 
-        安装后，纯英文语音会自动使用 Whisper 识别。
-        中文和中英混合语句仍使用 SenseVoice。
+        安装后，短音频(<2s)和纯英文语音会使用 Whisper 识别。
+        中文长句仍使用 SenseVoice。
 
         是否下载？
         """
@@ -584,7 +583,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         fputs("[AppDelegate] 开始下载 Whisper 模型...\n", stderr)
         SettingsManager.ensureAppSupportDir()
 
-        guard let url = URL(string: Self.whisperModelURL) else { return }
+        guard let url = URL(string: model.downloadURL) else { return }
 
         let task = URLSession.shared.downloadTask(with: url) { [weak self] tempURL, response, error in
             DispatchQueue.main.async {

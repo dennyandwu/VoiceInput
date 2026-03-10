@@ -272,18 +272,44 @@ final class StatusBarController {
 
         // ─── Whisper 英文增强 ──────────────────────────────
         let whisperDir = SettingsManager.whisperModelDir
-        let whisperInstalled = FileManager.default.fileExists(
-            atPath: (whisperDir as NSString).appendingPathComponent("small.en-encoder.int8.onnx"))
+        // Whisper 模型选择
+        let currentWhisper = settings.whisperModel
+        let whisperMenu = NSMenu()
 
-        if whisperInstalled {
-            let whisperItem = NSMenuItem(title: "✅ Whisper 英文增强已启用", action: nil, keyEquivalent: "")
-            whisperItem.isEnabled = false
-            menu.addItem(whisperItem)
-        } else {
-            let whisperItem = NSMenuItem(title: "⬇️ 下载 Whisper 英文增强", action: #selector(downloadWhisper), keyEquivalent: "")
-            whisperItem.target = self
-            menu.addItem(whisperItem)
-        }
+        // Small.en 选项
+        let smallEnInstalled = FileManager.default.fileExists(
+            atPath: (whisperDir as NSString).appendingPathComponent(SettingsManager.WhisperModel.smallEn.encoderFile))
+        let smallEnTitle = (currentWhisper == .smallEn ? "✅ " : "") +
+            "Small (英文专用, 60MB)" +
+            (smallEnInstalled ? "" : " [未下载]")
+        let smallEnItem = NSMenuItem(title: smallEnTitle, action: #selector(selectWhisperSmallEn), keyEquivalent: "")
+        smallEnItem.target = self
+        smallEnItem.state = currentWhisper == .smallEn ? .on : .off
+        whisperMenu.addItem(smallEnItem)
+
+        // Large-v3 选项
+        let largeInstalled = FileManager.default.fileExists(
+            atPath: (whisperDir as NSString).appendingPathComponent(SettingsManager.WhisperModel.largeV3.encoderFile))
+        let largeTitle = (currentWhisper == .largeV3 ? "✅ " : "") +
+            "Large-v3 (多语言, ~1GB)" +
+            (largeInstalled ? "" : " [未下载]")
+        let largeItem = NSMenuItem(title: largeTitle, action: #selector(selectWhisperLargeV3Turbo), keyEquivalent: "")
+        largeItem.target = self
+        largeItem.state = currentWhisper == .largeV3 ? .on : .off
+        whisperMenu.addItem(largeItem)
+
+        whisperMenu.addItem(.separator())
+
+        // 下载按钮
+        let downloadItem = NSMenuItem(title: "⬇️ 下载当前选中的模型", action: #selector(downloadWhisper), keyEquivalent: "")
+        downloadItem.target = self
+        whisperMenu.addItem(downloadItem)
+
+        let whisperStatus = currentWhisper == .largeV3 ?
+            "🎤 Whisper: Large-v3" : "🎤 Whisper: Small.en"
+        let whisperMenuItem = NSMenuItem(title: whisperStatus, action: nil, keyEquivalent: "")
+        whisperMenuItem.submenu = whisperMenu
+        menu.addItem(whisperMenuItem)
 
         menu.addItem(.separator())
 
@@ -479,6 +505,34 @@ final class StatusBarController {
         guard let mode = sender.representedObject as? String else { return }
         settings.languageMode = mode
         fputs("[StatusBar] 语言模式切换: \(mode) (\(settings.languageModeName))\n", stderr)
+    }
+
+    @objc private func selectWhisperSmallEn() {
+        settings.whisperModel = .smallEn
+        fputs("[StatusBar] Whisper 模型切换: small.en\n", stderr)
+        let path = (SettingsManager.whisperModelDir as NSString).appendingPathComponent(SettingsManager.WhisperModel.smallEn.encoderFile)
+        if !FileManager.default.fileExists(atPath: path) {
+            downloadWhisper()
+        } else {
+            let alert = NSAlert()
+            alert.messageText = "Whisper 已切换"
+            alert.informativeText = "Small (英文专用) 已选择。\n重启 VoiceInput 生效。"
+            alert.runModal()
+        }
+    }
+
+    @objc private func selectWhisperLargeV3Turbo() {
+        settings.whisperModel = .largeV3
+        fputs("[StatusBar] Whisper 模型切换: large-v3\n", stderr)
+        let path = (SettingsManager.whisperModelDir as NSString).appendingPathComponent(SettingsManager.WhisperModel.largeV3.encoderFile)
+        if !FileManager.default.fileExists(atPath: path) {
+            downloadWhisper()
+        } else {
+            let alert = NSAlert()
+            alert.messageText = "Whisper 已切换"
+            alert.informativeText = "Large-v3 (多语言) 已选择。\n重启 VoiceInput 生效。"
+            alert.runModal()
+        }
     }
 
     @objc private func downloadWhisper() {

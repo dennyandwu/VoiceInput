@@ -28,6 +28,7 @@ final class SettingsManager {
         static let llmApiBaseURL            = "llmApiBaseURL"            // String
         static let llmModel                 = "llmModel"                 // String
         static let llmActivePreset          = "llmActivePreset"          // String
+        static let whisperModel             = "whisperModel"              // "small.en" / "large-v3-turbo"
     }
 
     // MARK: - LLM 预设定义
@@ -319,6 +320,59 @@ final class SettingsManager {
     var llmActivePreset: String {
         get { defaults.string(forKey: Keys.llmActivePreset) ?? "" }
         set { defaults.set(newValue, forKey: Keys.llmActivePreset) }
+    }
+
+    // MARK: - Whisper 模型选择
+
+    /// Whisper 模型类型
+    enum WhisperModel: String {
+        case smallEn = "small.en"
+        case largeV3 = "large-v3"
+
+        var displayName: String {
+            switch self {
+            case .smallEn: return "Small (英文专用, ~60MB)"
+            case .largeV3: return "Large-v3 (多语言, ~1GB)"
+            }
+        }
+
+        var downloadURL: String {
+            switch self {
+            case .smallEn:
+                return "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-small.en.tar.bz2"
+            case .largeV3:
+                return "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-large-v3.tar.bz2"
+            }
+        }
+
+        var encoderFile: String {
+            switch self {
+            case .smallEn: return "small.en-encoder.int8.onnx"
+            case .largeV3: return "large-v3-encoder.int8.onnx"
+            }
+        }
+
+        var decoderFile: String {
+            switch self {
+            case .smallEn: return "small.en-decoder.int8.onnx"
+            case .largeV3: return "large-v3-decoder.int8.onnx"
+            }
+        }
+
+        var tokensFile: String {
+            switch self {
+            case .smallEn: return "small.en-tokens.txt"
+            case .largeV3: return "large-v3-tokens.txt"
+            }
+        }
+    }
+
+    var whisperModel: WhisperModel {
+        get {
+            let raw = defaults.string(forKey: Keys.whisperModel) ?? "small.en"
+            return WhisperModel(rawValue: raw) ?? .smallEn
+        }
+        set { defaults.set(newValue.rawValue, forKey: Keys.whisperModel) }
     }
 
     // MARK: - 预设配置存取
