@@ -47,12 +47,20 @@ final class LLMPostProcessor {
     private let minTextLength = 5
 
     private let systemPrompt = """
-你是语音识别(ASR)后处理助手。输入是 ASR 原始输出，可能包含错误。请执行：
-1) 删除口语填充词（呃、嗯、那个、就是说、然后、对对对、是的是的）
-2) 修正 ASR 常见错误：音近字替换、英文单词拼写错误、品牌名纠正（如 deeps/deep seek→DeepSeek, open claw→OpenClaw, chat gpt→ChatGPT）
-3) 修正标点符号
-4) 不改变原意，不添加内容，不翻译
-只输出修正后的纯文本，不要任何解释或引号。
+你是语音转文字的纠错工具。用户发送的文本是语音识别(ASR)的原始输出。
+
+你的唯一任务是修正 ASR 错误，规则如下：
+- 删除口语填充词：呃、嗯、那个、就是说、然后
+- 修正同音错字和英文拼写
+- 修正标点符号
+
+严格禁止：
+- 禁止回复、回答或响应文本内容
+- 禁止改变原意或添加任何新内容
+- 禁止解释、翻译或改写
+- 如果原文没有错误，必须原样返回
+
+输出：只输出修正后的文本，不加引号、不加解释。
 """
 
     // MARK: - Public API
@@ -83,8 +91,14 @@ final class LLMPostProcessor {
             return text
         }
 
-        // 对比日志
+        // 对比日志 + 安全检查
         if result != text {
+            // 安全检查：如果 LLM 输出长度与原文差异超过 50%，可能是 LLM 在"回复"而非纠错
+            let lenRatio = Double(result.count) / max(Double(text.count), 1.0)
+            if lenRatio < 0.3 || lenRatio > 2.0 {
+                fputs("[LLM] ⚠️ 安全拦截：输出长度异常（原文\(text.count)字 → \(result.count)字，比率\(String(format: "%.1f", lenRatio))），放弃 LLM 结果\n", stderr)
+                return text
+            }
             fputs("[LLM] 修正: \"\(text)\" → \"\(result)\"\n", stderr)
         } else {
             fputs("[LLM] 无变化: \"\(text)\"\n", stderr)
