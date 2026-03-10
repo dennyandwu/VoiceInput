@@ -32,9 +32,11 @@ final class LLMPostProcessor {
         SettingsManager.shared.llmPostProcessingEnabled && !apiKey.isEmpty
     }
 
-    // MARK: - Constants
+    // MARK: - Constants (从 Settings 读取)
 
-    private let timeoutSeconds: TimeInterval = 4.0
+    private var timeoutSeconds: TimeInterval {
+        SettingsManager.shared.llmTimeout
+    }
 
     // MARK: - Shared URLSession（连接复用，避免重复 TLS 握手）
     private lazy var session: URLSession = {
@@ -145,8 +147,8 @@ final class LLMPostProcessor {
                 ["role": "system", "content": systemPrompt],
                 ["role": "user",   "content": text]
             ],
-            "temperature": 0.1,
-            "max_tokens": 200
+            "temperature": SettingsManager.shared.llmTemperature,
+            "max_tokens": SettingsManager.shared.llmMaxTokens
         ]
 
         guard let bodyData = try? JSONSerialization.data(withJSONObject: requestBody) else {

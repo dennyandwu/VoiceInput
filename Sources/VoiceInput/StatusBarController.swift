@@ -412,6 +412,36 @@ final class StatusBarController {
         setModelItem.target = self
         llmMenu.addItem(setModelItem)
 
+        // 高级参数
+        llmMenu.addItem(.separator())
+        let advTitle = NSMenuItem(title: "── 高级参数 ──", action: nil, keyEquivalent: "")
+        advTitle.isEnabled = false
+        llmMenu.addItem(advTitle)
+
+        let maxTokensItem = NSMenuItem(
+            title: "Max Tokens: \(settings.llmMaxTokens)",
+            action: #selector(setLLMMaxTokens),
+            keyEquivalent: ""
+        )
+        maxTokensItem.target = self
+        llmMenu.addItem(maxTokensItem)
+
+        let tempItem = NSMenuItem(
+            title: "Temperature: \(String(format: "%.1f", settings.llmTemperature))",
+            action: #selector(setLLMTemperature),
+            keyEquivalent: ""
+        )
+        tempItem.target = self
+        llmMenu.addItem(tempItem)
+
+        let timeoutItem = NSMenuItem(
+            title: "Timeout: \(String(format: "%.0f", settings.llmTimeout))s",
+            action: #selector(setLLMTimeoutSetting),
+            keyEquivalent: ""
+        )
+        timeoutItem.target = self
+        llmMenu.addItem(timeoutItem)
+
         llmMenu.addItem(.separator())
 
         // 预设方案（动态生成，带 ✅ 标记和配置状态）
@@ -667,6 +697,68 @@ final class StatusBarController {
                 if !model.isEmpty {
                     self?.settings.llmModel = model
                     fputs("[StatusBar] LLM 模型: \(model)\n", stderr)
+                }
+            }
+        }
+    }
+
+    // MARK: - LLM 高级参数设置
+
+    @objc private func setLLMMaxTokens() {
+        DispatchQueue.main.async { [weak self] in
+            let alert = NSAlert()
+            alert.messageText = "Max Tokens"
+            alert.informativeText = "LLM 最大输出 token 数。\n推荐 100-500，默认 200。\n语音纠错一般 200 足够。"
+            alert.addButton(withTitle: "保存")
+            alert.addButton(withTitle: "取消")
+            let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
+            input.stringValue = "\(self?.settings.llmMaxTokens ?? 200)"
+            alert.accessoryView = input
+            NSApp.activate(ignoringOtherApps: true)
+            if alert.runModal() == .alertFirstButtonReturn {
+                if let val = Int(input.stringValue), val > 0 {
+                    self?.settings.llmMaxTokens = val
+                    fputs("[StatusBar] LLM Max Tokens: \(val)\n", stderr)
+                }
+            }
+        }
+    }
+
+    @objc private func setLLMTemperature() {
+        DispatchQueue.main.async { [weak self] in
+            let alert = NSAlert()
+            alert.messageText = "Temperature"
+            alert.informativeText = "控制输出随机性。\n0.0 = 最确定，1.0 = 最随机\n纠错推荐 0.0-0.3，默认 0.1。"
+            alert.addButton(withTitle: "保存")
+            alert.addButton(withTitle: "取消")
+            let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
+            input.stringValue = String(format: "%.1f", self?.settings.llmTemperature ?? 0.1)
+            alert.accessoryView = input
+            NSApp.activate(ignoringOtherApps: true)
+            if alert.runModal() == .alertFirstButtonReturn {
+                if let val = Double(input.stringValue), val >= 0, val <= 2.0 {
+                    self?.settings.llmTemperature = val
+                    fputs("[StatusBar] LLM Temperature: \(val)\n", stderr)
+                }
+            }
+        }
+    }
+
+    @objc private func setLLMTimeoutSetting() {
+        DispatchQueue.main.async { [weak self] in
+            let alert = NSAlert()
+            alert.messageText = "Timeout (秒)"
+            alert.informativeText = "LLM 请求超时时间。\n超时后回退原文。\n本地 Ollama 建议 2-4s，云端 API 建议 4-8s。"
+            alert.addButton(withTitle: "保存")
+            alert.addButton(withTitle: "取消")
+            let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
+            input.stringValue = String(format: "%.0f", self?.settings.llmTimeout ?? 4.0)
+            alert.accessoryView = input
+            NSApp.activate(ignoringOtherApps: true)
+            if alert.runModal() == .alertFirstButtonReturn {
+                if let val = Double(input.stringValue), val > 0 {
+                    self?.settings.llmTimeout = val
+                    fputs("[StatusBar] LLM Timeout: \(val)s\n", stderr)
                 }
             }
         }

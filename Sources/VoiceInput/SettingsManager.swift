@@ -28,7 +28,10 @@ final class SettingsManager {
         static let llmApiBaseURL            = "llmApiBaseURL"            // String
         static let llmModel                 = "llmModel"                 // String
         static let llmActivePreset          = "llmActivePreset"          // String
-        static let whisperModel             = "whisperModel"              // "small.en" / "large-v3-turbo"
+        static let whisperModel             = "whisperModel"              // "small.en" / "large-v3"
+        static let llmMaxTokens             = "llmMaxTokens"              // Int
+        static let llmTemperature           = "llmTemperature"            // Double
+        static let llmTimeout               = "llmTimeout"                // Double (seconds)
     }
 
     // MARK: - LLM 预设定义
@@ -373,6 +376,32 @@ final class SettingsManager {
             return WhisperModel(rawValue: raw) ?? .smallEn
         }
         set { defaults.set(newValue.rawValue, forKey: Keys.whisperModel) }
+    }
+
+    // MARK: - LLM 高级参数
+
+    var llmMaxTokens: Int {
+        get {
+            let v = defaults.integer(forKey: Keys.llmMaxTokens)
+            return v > 0 ? v : 200
+        }
+        set { defaults.set(newValue, forKey: Keys.llmMaxTokens) }
+    }
+
+    var llmTemperature: Double {
+        get {
+            let v = defaults.double(forKey: Keys.llmTemperature)
+            return v > 0 ? v : 0.1
+        }
+        set { defaults.set(newValue, forKey: Keys.llmTemperature) }
+    }
+
+    var llmTimeout: Double {
+        get {
+            let v = defaults.double(forKey: Keys.llmTimeout)
+            return v > 0 ? v : 4.0
+        }
+        set { defaults.set(newValue, forKey: Keys.llmTimeout) }
     }
 
     // MARK: - 预设配置存取
