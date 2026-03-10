@@ -85,13 +85,28 @@ ${CHANGELOG:-No changelog available.}
 
 success "Release $VERSION 创建完成"
 
-# ─── 步骤 4: 单独上传 DMG（避免截断）───────────────────────────────────────
+# ─── 步骤 4: 单独上传 DMG（用 curl 直传，避免 gh cli 截断 bug）──────────
 info "步骤 4/5: 上传 DMG 到 Release..."
 info "  本地大小: ${LOCAL_SIZE_MB}MB (${LOCAL_SIZE} bytes)"
 
-gh release upload "$VERSION" "$DMG_PATH" --clobber
+RELEASE_ID=$(gh api "repos/dennyandwu/VoiceInput/releases/tags/$VERSION" --jq '.id')
+TOKEN=$(gh auth token)
 
-success "DMG 上传完成"
+HTTP_CODE=$(curl --retry 3 --retry-delay 5 \
+    -X POST \
+    -H "Authorization: token $TOKEN" \
+    -H "Content-Type: application/octet-stream" \
+    -H "Content-Length: $LOCAL_SIZE" \
+    --data-binary @"$DMG_PATH" \
+    "https://uploads.github.com/repos/dennyandwu/VoiceInput/releases/$RELEASE_ID/assets?name=$DMG_NAME" \
+    -o /tmp/release_upload_result.json -w "%{http_code}" 2>/dev/null)
+
+if [ "$HTTP_CODE" != "201" ]; then
+    cat /tmp/release_upload_result.json 2>/dev/null
+    error "上传失败 (HTTP $HTTP_CODE)"
+fi
+
+success "DMG 上传完成 (HTTP $HTTP_CODE)"
 
 # ─── 步骤 5: 验证上传完整性 ─────────────────────────────────────────────────
 info "步骤 5/5: 验证 GitHub Release 完整性..."
