@@ -142,12 +142,11 @@ info "步骤 5/7: ad-hoc 代码签名..."
 
 # 先签名 dylib（要在 bundle 签名之前）
 info "  签名 Frameworks/..."
-codesign --force --options runtime --sign - "$APP_FRAMEWORKS/libonnxruntime.1.23.2.dylib" 2>&1 | grep -v "replacing existing signature" || true
-codesign --force --options runtime --sign - "$APP_FRAMEWORKS/libsherpa-onnx-c-api.dylib" 2>&1 | grep -v "replacing existing signature" || true
-
-# 签名所有 Frameworks 下的 dylib（确保无遗漏）
+# 先移除原始签名（sherpa-onnx dylib 带有第三方 Team ID），再用 ad-hoc 重签
 for dylib in "$APP_FRAMEWORKS"/*.dylib; do
-    [ -f "$dylib" ] && codesign --force --options runtime --sign - "$dylib" 2>&1 | grep -v "replacing existing signature" || true
+    [ -f "$dylib" ] || continue
+    codesign --remove-signature "$dylib" 2>/dev/null || true
+    codesign --force --options runtime --sign - "$dylib" 2>&1 | grep -v "replacing existing signature" || true
 done
 
 # 签名整个 bundle（不用 --deep，避免覆盖 framework 签名导致 Team ID 不一致）
