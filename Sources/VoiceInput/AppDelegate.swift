@@ -642,6 +642,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         }
                         // 复制所有 .onnx 和 tokens.txt 文件
                         if name.hasSuffix(".onnx") || name.contains("tokens") {
+                            // H5: 验证 onnx 文件最小大小（防截断/空文件）
+                            if name.hasSuffix(".onnx") {
+                                let attrs = try? fm.attributesOfItem(atPath: fileURL.path)
+                                let size = (attrs?[.size] as? Int64) ?? 0
+                                if size < 1_000_000 {  // < 1MB 的 onnx 文件视为异常
+                                    fputs("[AppDelegate] ⚠️ 模型文件过小，跳过: \(name) (\(size) bytes)\n", stderr)
+                                    continue
+                                }
+                            }
                             let destPath = (whisperDir as NSString).appendingPathComponent(name)
                             try? fm.removeItem(atPath: destPath)
                             try? fm.copyItem(atPath: fileURL.path, toPath: destPath)
