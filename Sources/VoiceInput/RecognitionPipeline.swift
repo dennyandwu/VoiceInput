@@ -319,17 +319,34 @@ class RecognitionPipeline {
 
         fputs("[Pipeline] SenseVoice: lang=\(detectedLang), dom=\(svDom), zh=\(String(format: "%.1f%%", svChinese * 100)), ascii=\(String(format: "%.1f%%", svASCII * 100)), text=\"\(svText)\"\n", stderr)
 
-        // MARK: 日语/韩语误检拦截
-        // SenseVoice 对短音频容易误判为日语，如果文本全是假名（无汉字无 ASCII），直接丢弃
+        // MARK: 日语/韩语误检拦截 → Whisper fallback
+        // SenseVoice 对短音频或英语容易误判为日语假名，fallback 到 Whisper
         if (detectedLang == "<|ja|>" || detectedLang == "<|ko|>") && svChinese == 0 && svASCII == 0 {
             let hasUsefulContent = svText.unicodeScalars.contains { scalar in
-                // 检查是否有 CJK 汉字（非假名非韩文）
                 (0x4E00...0x9FFF).contains(scalar.value) ||   // CJK Unified
                 (0x3400...0x4DBF).contains(scalar.value) ||   // CJK Extension A
                 (0x0041...0x007A).contains(scalar.value)      // ASCII letters
             }
             if !hasUsefulContent {
-                fputs("[Pipeline] ⚠️ 语言误检拦截: \(detectedLang) 但无汉字/ASCII，丢弃结果\n", stderr)
+                if engine.hasWhisper {
+                    fputs("[Pipeline] ⚠️ 语言误检(\(detectedLang))，全假名无汉字 → Whisper fallback\n", stderr)
+                    let whisperResult = engine.recognizeWithWhisper(audioData: audioData, sampleRate: 16000)
+                    let wText = whisperResult.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !wText.isEmpty {
+                        fputs("[Pipeline] Whisper fallback 结果: \"\(wText)\"\n", stderr)
+                        return PipelineResult(
+                            text: wText,
+                            lang: whisperResult.lang.isEmpty ? "<|en|>" : whisperResult.lang,
+                            emotion: "", event: "",
+                            audioSamples: audioData.count,
+                            duration: duration,
+                            processingTime: Date().timeIntervalSince(t0)
+                        )
+                    }
+                    fputs("[Pipeline] Whisper fallback 也返回空，丢弃\n", stderr)
+                } else {
+                    fputs("[Pipeline] ⚠️ 语言误检(\(detectedLang))，无 Whisper 可用，丢弃\n", stderr)
+                }
                 return PipelineResult(text: "", lang: "zh", emotion: "", event: "", audioSamples: 0, duration: duration, processingTime: 0)
             }
         }
