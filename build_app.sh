@@ -157,9 +157,9 @@ info "步骤 6/7: 验证 bundle..."
 
 # 验证版本号
 PLIST_VER=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null)
-info "  Bundle 版本: $PLIST_VER (期望: $VERSION)"
-if [ "$PLIST_VER" != "$VERSION" ]; then
-    error "版本号不匹配! Info.plist=$PLIST_VER, 期望=$VERSION"
+info "  Bundle 版本: $PLIST_VER (期望: $APP_VERSION)"
+if [ "$PLIST_VER" != "$APP_VERSION" ]; then
+    error "版本号不匹配! Info.plist=$PLIST_VER, 期望=$APP_VERSION"
 fi
 
 # 验证签名
