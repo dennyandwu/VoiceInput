@@ -142,18 +142,25 @@ info "步骤 5/7: ad-hoc 代码签名..."
 
 # 先签名 dylib（要在 bundle 签名之前）
 info "  签名 Frameworks/..."
-codesign --force --sign - "$APP_FRAMEWORKS/libonnxruntime.1.23.2.dylib" 2>&1 | grep -v "replacing existing signature" || true
-codesign --force --sign - "$APP_FRAMEWORKS/libsherpa-onnx-c-api.dylib" 2>&1 | grep -v "replacing existing signature" || true
+codesign --force --options runtime --sign - "$APP_FRAMEWORKS/libonnxruntime.1.23.2.dylib" 2>&1 | grep -v "replacing existing signature" || true
+codesign --force --options runtime --sign - "$APP_FRAMEWORKS/libsherpa-onnx-c-api.dylib" 2>&1 | grep -v "replacing existing signature" || true
 
 # 签名整个 bundle
 info "  签名 .app bundle..."
-codesign --force --deep --sign - "$APP_BUNDLE" 2>&1 | grep -v "replacing existing signature" || true
+codesign --force --deep --options runtime --sign - "$APP_BUNDLE" 2>&1 | grep -v "replacing existing signature" || true
 
 success "代码签名完成"
 echo ""
 
 # ─── 步骤 6: 验证 ───────────────────────────────────────────────────────────
 info "步骤 6/7: 验证 bundle..."
+
+# 验证版本号
+PLIST_VER=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null)
+info "  Bundle 版本: $PLIST_VER (期望: $VERSION)"
+if [ "$PLIST_VER" != "$VERSION" ]; then
+    error "版本号不匹配! Info.plist=$PLIST_VER, 期望=$VERSION"
+fi
 
 # 验证签名
 info "  验证代码签名..."
