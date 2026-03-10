@@ -213,6 +213,8 @@ class RecognitionPipeline {
             return PipelineResult(text: "", lang: "", emotion: "", event: "", audioSamples: 0, duration: 0, processingTime: 0)
         }
 
+        // H6: 确保不在主线程 sleep
+        assert(!Thread.isMainThread, "recordAndRecognize 不应在主线程调用")
         Thread.sleep(forTimeInterval: duration)
 
         let result = stopListening()
@@ -306,6 +308,28 @@ class RecognitionPipeline {
         let duration = Double(audioData.count) / 16000.0
         let t0 = Date()
 
+        // MARK: 短音频快速路径 — 直接走 Whisper
+        // SenseVoice 对短音频语言检测不稳定（"SenseVoice" → "アイスボイス"）
+        let shortThreshold = SettingsManager.shared.shortAudioThreshold
+        if duration < shortThreshold && engine.hasWhisper {
+            fputs("[Pipeline] 短音频（\(String(format: "%.1f", duration))s < \(String(format: "%.1f", shortThreshold))s）→ Whisper 直接处理\n", stderr)
+            let whisperResult = engine.recognizeWithWhisper(audioData: audioData, sampleRate: 16000)
+            let wText = whisperResult.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let elapsed = Date().timeIntervalSince(t0)
+            if !wText.isEmpty {
+                fputs("[Pipeline] Whisper 短音频结果: \"\(wText)\" (\(String(format: "%.3f", elapsed))s)\n", stderr)
+                return PipelineResult(
+                    text: wText,
+                    lang: whisperResult.lang.isEmpty ? "<|en|>" : whisperResult.lang,
+                    emotion: "", event: "",
+                    audioSamples: audioData.count,
+                    duration: duration,
+                    processingTime: elapsed
+                )
+            }
+            fputs("[Pipeline] Whisper 短音频返回空，回退 SenseVoice\n", stderr)
+        }
+
         // 第一遍：SenseVoice（快速语言检测 + 中文识别）
         let senseVoiceResult = engine.recognize(audioData: audioData, sampleRate: 16000)
         let detectedLang = TextPostProcessor.extractLanguage(senseVoiceResult.text).isEmpty
@@ -318,6 +342,38 @@ class RecognitionPipeline {
         let svDom = dominantLanguage(svText)
 
         fputs("[Pipeline] SenseVoice: lang=\(detectedLang), dom=\(svDom), zh=\(String(format: "%.1f%%", svChinese * 100)), ascii=\(String(format: "%.1f%%", svASCII * 100)), text=\"\(svText)\"\n", stderr)
+
+        // MARK: 日语/韩语误检拦截 → Whisper fallback
+        // SenseVoice 对短音频或英语容易误判为日语假名，fallback 到 Whisper
+        if (detectedLang == "<|ja|>" || detectedLang == "<|ko|>") && svChinese == 0 && svASCII == 0 {
+            let hasUsefulContent = svText.unicodeScalars.contains { scalar in
+                (0x4E00...0x9FFF).contains(scalar.value) ||   // CJK Unified
+                (0x3400...0x4DBF).contains(scalar.value) ||   // CJK Extension A
+                (0x0041...0x007A).contains(scalar.value)      // ASCII letters
+            }
+            if !hasUsefulContent {
+                if engine.hasWhisper {
+                    fputs("[Pipeline] ⚠️ 语言误检(\(detectedLang))，全假名无汉字 → Whisper fallback\n", stderr)
+                    let whisperResult = engine.recognizeWithWhisper(audioData: audioData, sampleRate: 16000)
+                    let wText = whisperResult.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !wText.isEmpty {
+                        fputs("[Pipeline] Whisper fallback 结果: \"\(wText)\"\n", stderr)
+                        return PipelineResult(
+                            text: wText,
+                            lang: whisperResult.lang.isEmpty ? "<|en|>" : whisperResult.lang,
+                            emotion: "", event: "",
+                            audioSamples: audioData.count,
+                            duration: duration,
+                            processingTime: Date().timeIntervalSince(t0)
+                        )
+                    }
+                    fputs("[Pipeline] Whisper fallback 也返回空，丢弃\n", stderr)
+                } else {
+                    fputs("[Pipeline] ⚠️ 语言误检(\(detectedLang))，无 Whisper 可用，丢弃\n", stderr)
+                }
+                return PipelineResult(text: "", lang: "zh", emotion: "", event: "", audioSamples: 0, duration: duration, processingTime: 0)
+            }
+        }
 
         var finalResult = senseVoiceResult
 

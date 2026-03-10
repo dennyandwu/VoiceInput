@@ -38,6 +38,7 @@ class HotkeyManager {
     // MARK: - Private State
 
     private var eventTap: CFMachPort?
+    private var selfRetained: Unmanaged<HotkeyManager>?
     private var runLoopSource: CFRunLoopSource?
     private var isListening = false
 
@@ -78,7 +79,9 @@ class HotkeyManager {
         }
 
         // 使用 Unmanaged 传递 self 给 C 回调
-        let selfPtr = Unmanaged.passRetained(self).toOpaque()
+        let retained = Unmanaged.passRetained(self)
+        let selfPtr = retained.toOpaque()
+        self.selfRetained = retained
 
         let eventMask: CGEventMask =
             (1 << CGEventType.keyDown.rawValue) |
@@ -130,6 +133,9 @@ class HotkeyManager {
 
         eventTap = nil
         runLoopSource = nil
+        // H2: release passRetained 的 self
+        selfRetained?.release()
+        selfRetained = nil
         isListening = false
 
         fputs("[HotkeyManager] 已停止监听\n", stderr)

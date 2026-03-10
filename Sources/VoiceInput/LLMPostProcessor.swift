@@ -32,9 +32,11 @@ final class LLMPostProcessor {
         SettingsManager.shared.llmPostProcessingEnabled && !apiKey.isEmpty
     }
 
-    // MARK: - Constants
+    // MARK: - Constants (从 Settings 读取)
 
-    private let timeoutSeconds: TimeInterval = 4.0
+    private var timeoutSeconds: TimeInterval {
+        SettingsManager.shared.llmTimeout
+    }
 
     // MARK: - Shared URLSession（连接复用，避免重复 TLS 握手）
     private lazy var session: URLSession = {
@@ -44,7 +46,9 @@ final class LLMPostProcessor {
         config.httpMaximumConnectionsPerHost = 2
         return URLSession(configuration: config)
     }()
-    private let minTextLength = 5
+    private var minTextLength: Int {
+        SettingsManager.shared.llmMinTextLength
+    }
 
     private let systemPrompt = """
 你是语音转文字的纠错工具。用户发送的文本是语音识别(ASR)的原始输出。
@@ -99,9 +103,10 @@ final class LLMPostProcessor {
                 fputs("[LLM] ⚠️ 安全拦截：输出长度异常（原文\(text.count)字 → \(result.count)字，比率\(String(format: "%.1f", lenRatio))），放弃 LLM 结果\n", stderr)
                 return text
             }
-            fputs("[LLM] 修正: \"\(text)\" → \"\(result)\"\n", stderr)
+            // H8: 日志只记录长度和是否修改，不记录完整文本（隐私）
+            fputs("[LLM] 修正: \(text.count)字 → \(result.count)字\n", stderr)
         } else {
-            fputs("[LLM] 无变化: \"\(text)\"\n", stderr)
+            fputs("[LLM] 无变化 (\(text.count)字)\n", stderr)
         }
 
         return result
@@ -128,7 +133,8 @@ final class LLMPostProcessor {
     /// 核心 API 调用（URLSession，纯 Foundation）
     private func callAPI(text: String, completion: @escaping (String) -> Void) {
         let startTime = Date()
-        let key = apiKey
+        // H7: 清理 API Key 中的换行符防止 HTTP Header 注入
+        let key = apiKey.replacingOccurrences(of: "\n", with: "").replacingOccurrences(of: "\r", with: "")
         let baseURL = apiBaseURL.hasSuffix("/") ? String(apiBaseURL.dropLast()) : apiBaseURL
         let endpoint = "\(baseURL)/chat/completions"
 
@@ -145,8 +151,8 @@ final class LLMPostProcessor {
                 ["role": "system", "content": systemPrompt],
                 ["role": "user",   "content": text]
             ],
-            "temperature": 0.1,
-            "max_tokens": 200
+            "temperature": SettingsManager.shared.llmTemperature,
+            "max_tokens": SettingsManager.shared.llmMaxTokens
         ]
 
         guard let bodyData = try? JSONSerialization.data(withJSONObject: requestBody) else {

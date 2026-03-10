@@ -107,7 +107,12 @@ class TextInjector {
     /// 通过 CGEventKeyboardSetUnicodeString 直接模拟键入
     /// 参考 open-typeless 的实现，每次最多 20 个 Unicode 字符
     private func injectViaKeyboardSimulation(text: String) -> Bool {
-        fputs("[TextInjector] 使用 CGEvent Unicode 注入\n", stderr)
+        // H10: 焦点检查 — 确认有前台应用
+        guard let frontApp = NSWorkspace.shared.frontmostApplication else {
+            fputs("[TextInjector] ⚠️ 无前台应用，跳过注入\n", stderr)
+            return false
+        }
+        fputs("[TextInjector] 使用 CGEvent Unicode 注入 → \(frontApp.localizedName ?? "unknown")\n", stderr)
 
         let utf16 = Array(text.utf16)
         let chunkSize = 20  // CGEvent 限制每次最多 ~20 个 UTF-16 code unit

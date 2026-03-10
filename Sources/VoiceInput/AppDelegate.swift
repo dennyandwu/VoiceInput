@@ -5,6 +5,7 @@
 
 import Foundation
 import AppKit
+import UserNotifications
 // UserNotifications requires app bundle; use osascript fallback instead
 
 /// AppDelegate 是 GUI 模式的核心协调器
@@ -313,19 +314,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let allowed = settings.allowedLanguages
         let filtered = TextPostProcessor.filterByLanguage(cleanedText.isEmpty ? rawText : cleanedText, detectedLang: lang, allowed: allowed)
         lang = filtered.lang
+        let filteredText = filtered.text  // 使用过滤后的文本（日语假名等已清除）
         let langName = TextPostProcessor.languageName(lang)
 
-        // 优先用清理后文本，若清理后为空但原文有内容则用原文（去 token 后）
+        // 优先用过滤后文本，若为空但原文有内容则用原文（去 token 后）
         var processedText: String
-        if !cleanedText.isEmpty {
-            processedText = cleanedText
+        if !filteredText.isEmpty && filteredText.count > 1 {
+            processedText = filteredText
         } else {
             // 去掉 SenseVoice token 但保留原始内容
             let stripped = rawText.replacingOccurrences(of: #"<\|[^|]+\|>"#, with: "", options: .regularExpression)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            if stripped.count > 1 {
-                processedText = stripped
-                fputs("[AppDelegate] ℹ️ PostProcessor 过滤了原文，降级使用去 token 文本: \"\(stripped)\"\n", stderr)
+            // 对降级文本也做语言过滤
+            let strippedFiltered = TextPostProcessor.filterByLanguage(stripped, detectedLang: lang, allowed: allowed).text
+            let finalStripped = strippedFiltered.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+            if !finalStripped.isEmpty {
+                processedText = strippedFiltered
+                fputs("[AppDelegate] ℹ️ PostProcessor 过滤了原文，降级使用去 token 文本: \"\(strippedFiltered)\"\n", stderr)
             } else {
                 fputs("[AppDelegate] ℹ️ 识别结果为空或无意义（原文: \"\(rawText)\"）\n", stderr)
                 recordingOverlay.setStatus("未检测到有效语音")
@@ -388,18 +393,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - 系统通知
 
     private func requestNotificationPermission() {
-        // No-op: notifications use osascript, no permission needed
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
+            if let error = error {
+                fputs("[AppDelegate] 通知权限请求失败: \(error.localizedDescription)\n", stderr)
+            }
+            fputs("[AppDelegate] 通知权限: \(granted ? "已授权" : "未授权")\n", stderr)
+        }
     }
 
     private func sendNotification(text: String, lang: String) {
-        let title = "VoiceInput"
-        let subtitle = lang.isEmpty ? "" : "[\(lang)] "
-        let body = "\(subtitle)\(text)"
-        let script = "display notification \"\(body.replacingOccurrences(of: "\"", with: "\\\""))\" with title \"\(title)\""
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        proc.arguments = ["-e", script]
-        try? proc.run()
+        let content = UNMutableNotificationContent()
+        content.title = "VoiceInput"
+        content.body = lang.isEmpty ? text : "[\(lang)] \(text)"
+        content.sound = nil
+
+        let request = UNNotificationRequest(
+            identifier: UUID().uuidString,
+            content: content,
+            trigger: nil  // 立即发送
+        )
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error = error {
+                fputs("[AppDelegate] 通知发送失败: \(error.localizedDescription)\n", stderr)
+            }
+        }
     }
 
     // MARK: - Alert
@@ -536,38 +553,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Whisper 英文增强引擎
 
-    /// Whisper small 模型下载 URL（sherpa-onnx 预转换）
-    private static let whisperModelURL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-small.en.tar.bz2"
-
     /// 尝试加载 Whisper 模型（如果已下载）
     private func tryLoadWhisper(engine: SpeechEngine) {
+        let model = settings.whisperModel
         let whisperDir = SettingsManager.whisperModelDir
-        let encoderPath = (whisperDir as NSString).appendingPathComponent("small.en-encoder.int8.onnx")
-        let decoderPath = (whisperDir as NSString).appendingPathComponent("small.en-decoder.int8.onnx")
-        let tokensPath = (whisperDir as NSString).appendingPathComponent("small.en-tokens.txt")
+        let encoderPath = (whisperDir as NSString).appendingPathComponent(model.encoderFile)
+        let decoderPath = (whisperDir as NSString).appendingPathComponent(model.decoderFile)
+        let tokensPath = (whisperDir as NSString).appendingPathComponent(model.tokensFile)
 
         guard FileManager.default.fileExists(atPath: encoderPath) else {
-            fputs("[AppDelegate] Whisper 模型未安装（菜单可下载）\n", stderr)
+            fputs("[AppDelegate] Whisper \(model.rawValue) 模型未安装（菜单可下载）\n", stderr)
             return
         }
 
         pipelineQueue.async {
             let success = engine.loadWhisper(encoderPath: encoderPath, decoderPath: decoderPath, tokensPath: tokensPath)
             if success {
-                fputs("[AppDelegate] ✅ Whisper 英文增强已启用\n", stderr)
+                fputs("[AppDelegate] ✅ Whisper \(model.rawValue) 已启用\n", stderr)
             }
         }
     }
 
     /// 下载 Whisper 模型
     private func downloadWhisperModel() {
+        let model = settings.whisperModel
         let alert = NSAlert()
-        alert.messageText = "下载 Whisper 英文增强模型"
+        alert.messageText = "下载 Whisper 模型"
         alert.informativeText = """
-        Whisper Small（英文专用，约 200MB）可大幅提升英文识别准确率。
+        \(model.displayName)
 
-        安装后，纯英文语音会自动使用 Whisper 识别。
-        中文和中英混合语句仍使用 SenseVoice。
+        安装后，短音频(<2s)和纯英文语音会使用 Whisper 识别。
+        中文长句仍使用 SenseVoice。
 
         是否下载？
         """
@@ -580,7 +596,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         fputs("[AppDelegate] 开始下载 Whisper 模型...\n", stderr)
         SettingsManager.ensureAppSupportDir()
 
-        guard let url = URL(string: Self.whisperModelURL) else { return }
+        guard let url = URL(string: model.downloadURL) else { return }
 
         let task = URLSession.shared.downloadTask(with: url) { [weak self] tempURL, response, error in
             DispatchQueue.main.async {
@@ -618,8 +634,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let enumerator = fm.enumerator(at: extractDir, includingPropertiesForKeys: nil) {
                     for case let fileURL as URL in enumerator {
                         let name = fileURL.lastPathComponent
+                        // H4: 路径验证防 Zip Slip
+                        let resolved = fileURL.standardizedFileURL.path
+                        guard resolved.hasPrefix(extractDir.path) else {
+                            fputs("[AppDelegate] ⚠️ 路径穿越检测，跳过: \(resolved)\n", stderr)
+                            continue
+                        }
                         // 复制所有 .onnx 和 tokens.txt 文件
                         if name.hasSuffix(".onnx") || name.contains("tokens") {
+                            // H5: 验证 onnx 文件最小大小（防截断/空文件）
+                            if name.hasSuffix(".onnx") {
+                                let attrs = try? fm.attributesOfItem(atPath: fileURL.path)
+                                let size = (attrs?[.size] as? Int64) ?? 0
+                                if size < 1_000_000 {  // < 1MB 的 onnx 文件视为异常
+                                    fputs("[AppDelegate] ⚠️ 模型文件过小，跳过: \(name) (\(size) bytes)\n", stderr)
+                                    continue
+                                }
+                            }
                             let destPath = (whisperDir as NSString).appendingPathComponent(name)
                             try? fm.removeItem(atPath: destPath)
                             try? fm.copyItem(atPath: fileURL.path, toPath: destPath)

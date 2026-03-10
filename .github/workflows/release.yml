@@ -36,6 +36,9 @@ jobs:
           curl -L -o Resources/models/silero-vad/silero_vad.onnx \
             "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx"
 
+      - name: Build binary
+        run: bash build.sh
+
       - name: Build app bundle + DMG
         run: bash build_app.sh
 

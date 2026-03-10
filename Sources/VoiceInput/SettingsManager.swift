@@ -28,6 +28,12 @@ final class SettingsManager {
         static let llmApiBaseURL            = "llmApiBaseURL"            // String
         static let llmModel                 = "llmModel"                 // String
         static let llmActivePreset          = "llmActivePreset"          // String
+        static let whisperModel             = "whisperModel"              // "small.en" / "large-v3"
+        static let llmMaxTokens             = "llmMaxTokens"              // Int
+        static let llmTemperature           = "llmTemperature"            // Double
+        static let llmTimeout               = "llmTimeout"                // Double (seconds)
+        static let llmMinTextLength         = "llmMinTextLength"          // Int
+        static let shortAudioThreshold      = "shortAudioThreshold"       // Double (seconds)
     }
 
     // MARK: - LLM 预设定义
@@ -60,6 +66,18 @@ final class SettingsManager {
 
     private init() {
         registerDefaults()
+        migrateApiKeyToKeychain()
+    }
+
+    /// 迁移明文 API Key 从 UserDefaults 到 Keychain
+    private func migrateApiKeyToKeychain() {
+        if let oldKey = defaults.string(forKey: Keys.llmApiKey), !oldKey.isEmpty {
+            if KeychainHelper.get(service: "com.urdao.voiceinput", account: "llmApiKey") == nil {
+                KeychainHelper.set(oldKey, service: "com.urdao.voiceinput", account: "llmApiKey")
+                fputs("[Settings] API Key 已从 UserDefaults 迁移到 Keychain\n", stderr)
+            }
+            defaults.removeObject(forKey: Keys.llmApiKey)
+        }
     }
 
     /// 注册默认值（仅在 key 不存在时生效）
@@ -191,73 +209,34 @@ final class SettingsManager {
         if enable {
             // 获取当前二进制路径
             let binaryPath = CommandLine.arguments[0]
-
-            // 检查是否在 .app bundle 中运行
             let isInBundle = binaryPath.contains(".app/Contents/MacOS/")
 
-            let plistContent: String
+            // C4: 用 PropertyListSerialization 代替字符串拼接，防止 XML 注入
+            var plistDict: [String: Any] = [
+                "Label": "com.urdao.VoiceInput",
+                "RunAtLoad": true,
+                "KeepAlive": false
+            ]
+
             if isInBundle {
-                // .app bundle 模式：直接用 open 命令启动，无需 DYLD_LIBRARY_PATH
                 let macosDir = (binaryPath as NSString).deletingLastPathComponent
                 let contentsDir = (macosDir as NSString).deletingLastPathComponent
                 let appPath = (contentsDir as NSString).deletingLastPathComponent
-                plistContent = """
-                <?xml version="1.0" encoding="UTF-8"?>
-                <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-                    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-                <plist version="1.0">
-                <dict>
-                    <key>Label</key>
-                    <string>com.urdao.VoiceInput</string>
-                    <key>ProgramArguments</key>
-                    <array>
-                        <string>/usr/bin/open</string>
-                        <string>-a</string>
-                        <string>\(appPath)</string>
-                    </array>
-                    <key>RunAtLoad</key>
-                    <true/>
-                    <key>KeepAlive</key>
-                    <false/>
-                </dict>
-                </plist>
-                """
+                plistDict["ProgramArguments"] = ["/usr/bin/open", "-a", appPath]
             } else {
-                // 直接二进制模式：需要 DYLD_LIBRARY_PATH
                 let libDir = (binaryPath as NSString).deletingLastPathComponent
                     .appending("/../sherpa-onnx-v1.12.28-osx-universal2-shared/lib")
                 let resolvedLibDir = (libDir as NSString).standardizingPath
-
-                plistContent = """
-                <?xml version="1.0" encoding="UTF-8"?>
-                <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-                    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-                <plist version="1.0">
-                <dict>
-                    <key>Label</key>
-                    <string>com.urdao.VoiceInput</string>
-                    <key>ProgramArguments</key>
-                    <array>
-                        <string>\(binaryPath)</string>
-                    </array>
-                    <key>EnvironmentVariables</key>
-                    <dict>
-                        <key>DYLD_LIBRARY_PATH</key>
-                        <string>\(resolvedLibDir)</string>
-                    </dict>
-                    <key>RunAtLoad</key>
-                    <true/>
-                    <key>KeepAlive</key>
-                    <false/>
-                </dict>
-                </plist>
-                """
+                plistDict["ProgramArguments"] = [binaryPath]
+                plistDict["EnvironmentVariables"] = ["DYLD_LIBRARY_PATH": resolvedLibDir]
             }
 
             do {
                 try FileManager.default.createDirectory(at: launchAgentDir,
                     withIntermediateDirectories: true)
-                try plistContent.write(to: plistPath, atomically: true, encoding: .utf8)
+                let plistData = try PropertyListSerialization.data(
+                    fromPropertyList: plistDict, format: .xml, options: 0)
+                try plistData.write(to: plistPath)
                 fputs("[Settings] LaunchAgent plist 已写入: \(plistPath.path)\n", stderr)
             } catch {
                 fputs("[Settings] ERROR: 无法写入 LaunchAgent plist: \(error)\n", stderr)
@@ -292,9 +271,18 @@ final class SettingsManager {
     }
 
     /// OpenAI API Key（或兼容 API 的密钥）
+    // C5: API Key 使用 Keychain 存储，不再明文存 UserDefaults
     var llmApiKey: String {
-        get { defaults.string(forKey: Keys.llmApiKey) ?? "" }
-        set { defaults.set(newValue, forKey: Keys.llmApiKey) }
+        get { KeychainHelper.get(service: "com.urdao.voiceinput", account: "llmApiKey") ?? "" }
+        set {
+            if newValue.isEmpty {
+                KeychainHelper.delete(service: "com.urdao.voiceinput", account: "llmApiKey")
+            } else {
+                KeychainHelper.set(newValue, service: "com.urdao.voiceinput", account: "llmApiKey")
+            }
+            // 清除旧的 UserDefaults 明文存储（迁移）
+            defaults.removeObject(forKey: Keys.llmApiKey)
+        }
     }
 
     /// API Base URL，默认 https://api.openai.com/v1，支持自定义（兼容 OpenAI compatible API）
@@ -321,12 +309,112 @@ final class SettingsManager {
         set { defaults.set(newValue, forKey: Keys.llmActivePreset) }
     }
 
+    // MARK: - Whisper 模型选择
+
+    /// Whisper 模型类型
+    enum WhisperModel: String {
+        case smallEn = "small.en"
+        case largeV3 = "large-v3"
+
+        var displayName: String {
+            switch self {
+            case .smallEn: return "Small (英文专用, ~60MB)"
+            case .largeV3: return "Large-v3 (多语言, ~1GB)"
+            }
+        }
+
+        var downloadURL: String {
+            switch self {
+            case .smallEn:
+                return "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-small.en.tar.bz2"
+            case .largeV3:
+                return "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-large-v3.tar.bz2"
+            }
+        }
+
+        var encoderFile: String {
+            switch self {
+            case .smallEn: return "small.en-encoder.int8.onnx"
+            case .largeV3: return "large-v3-encoder.int8.onnx"
+            }
+        }
+
+        var decoderFile: String {
+            switch self {
+            case .smallEn: return "small.en-decoder.int8.onnx"
+            case .largeV3: return "large-v3-decoder.int8.onnx"
+            }
+        }
+
+        var tokensFile: String {
+            switch self {
+            case .smallEn: return "small.en-tokens.txt"
+            case .largeV3: return "large-v3-tokens.txt"
+            }
+        }
+    }
+
+    var whisperModel: WhisperModel {
+        get {
+            let raw = defaults.string(forKey: Keys.whisperModel) ?? "small.en"
+            return WhisperModel(rawValue: raw) ?? .smallEn
+        }
+        set { defaults.set(newValue.rawValue, forKey: Keys.whisperModel) }
+    }
+
+    // MARK: - LLM 高级参数
+
+    var llmMaxTokens: Int {
+        get {
+            let v = defaults.integer(forKey: Keys.llmMaxTokens)
+            return v > 0 ? v : 200
+        }
+        set { defaults.set(newValue, forKey: Keys.llmMaxTokens) }
+    }
+
+    var llmTemperature: Double {
+        get {
+            let v = defaults.double(forKey: Keys.llmTemperature)
+            return v > 0 ? v : 0.1
+        }
+        set { defaults.set(newValue, forKey: Keys.llmTemperature) }
+    }
+
+    var llmTimeout: Double {
+        get {
+            let v = defaults.double(forKey: Keys.llmTimeout)
+            return v > 0 ? v : 4.0
+        }
+        set { defaults.set(newValue, forKey: Keys.llmTimeout) }
+    }
+
+    /// LLM 最短文本长度（低于此长度跳过 LLM）
+    var llmMinTextLength: Int {
+        get {
+            let v = defaults.integer(forKey: Keys.llmMinTextLength)
+            return v > 0 ? v : 5
+        }
+        set { defaults.set(newValue, forKey: Keys.llmMinTextLength) }
+    }
+
+    /// 短音频阈值（秒），低于此时长的音频走 Whisper
+    var shortAudioThreshold: Double {
+        get {
+            let v = defaults.double(forKey: Keys.shortAudioThreshold)
+            return v > 0 ? v : 2.0
+        }
+        set { defaults.set(newValue, forKey: Keys.shortAudioThreshold) }
+    }
+
     // MARK: - 预设配置存取
 
     /// 保存当前配置到指定预设
     func saveCurrentToPreset(_ presetId: String) {
         let prefix = "llm.preset.\(presetId)"
-        defaults.set(llmApiKey, forKey: "\(prefix).apiKey")
+        // API Key 存 Keychain
+        if !llmApiKey.isEmpty {
+            KeychainHelper.set(llmApiKey, service: "com.urdao.voiceinput", account: "\(prefix).apiKey")
+        }
         defaults.set(llmApiBaseURL, forKey: "\(prefix).baseURL")
         defaults.set(llmModel, forKey: "\(prefix).model")
         llmActivePreset = presetId
@@ -350,7 +438,7 @@ final class SettingsManager {
         }
 
         // 加载保存的配置，没保存过则用默认值
-        let savedKey = defaults.string(forKey: "\(prefix).apiKey") ?? ""
+        let savedKey = KeychainHelper.get(service: "com.urdao.voiceinput", account: "\(prefix).apiKey") ?? ""
         let savedURL = defaults.string(forKey: "\(prefix).baseURL") ?? ""
         let savedModel = defaults.string(forKey: "\(prefix).model") ?? ""
 
@@ -372,7 +460,7 @@ final class SettingsManager {
 
     /// 获取预设已保存的 API Key（用于菜单显示）
     func presetHasApiKey(_ presetId: String) -> Bool {
-        let key = defaults.string(forKey: "llm.preset.\(presetId).apiKey") ?? ""
+        let key = KeychainHelper.get(service: "com.urdao.voiceinput", account: "llm.preset.\(presetId).apiKey") ?? ""
         return !key.isEmpty
     }
 

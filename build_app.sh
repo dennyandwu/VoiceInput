@@ -10,7 +10,7 @@ cd "$SCRIPT_DIR"
 
 # ─── 配置 ───────────────────────────────────────────────────────────────────
 APP_NAME="VoiceInput"
-APP_VERSION="2.2.2"
+APP_VERSION="3.0.0"
 BUNDLE_ID="com.urdao.voiceinput"
 
 SHERPA_DIR="$SCRIPT_DIR/sherpa-onnx-v1.12.28-osx-universal2-shared"
@@ -157,9 +157,9 @@ info "步骤 6/7: 验证 bundle..."
 
 # 验证版本号
 PLIST_VER=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null)
-info "  Bundle 版本: $PLIST_VER (期望: $VERSION)"
-if [ "$PLIST_VER" != "$VERSION" ]; then
-    error "版本号不匹配! Info.plist=$PLIST_VER, 期望=$VERSION"
+info "  Bundle 版本: $PLIST_VER (期望: $APP_VERSION)"
+if [ "$PLIST_VER" != "$APP_VERSION" ]; then
+    error "版本号不匹配! Info.plist=$PLIST_VER, 期望=$APP_VERSION"
 fi
 
 # 验证签名
