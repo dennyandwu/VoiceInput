@@ -442,6 +442,22 @@ final class StatusBarController {
         timeoutItem.target = self
         llmMenu.addItem(timeoutItem)
 
+        let minLenItem = NSMenuItem(
+            title: "最短文本: \(settings.llmMinTextLength) 字符",
+            action: #selector(setLLMMinTextLength),
+            keyEquivalent: ""
+        )
+        minLenItem.target = self
+        llmMenu.addItem(minLenItem)
+
+        let shortAudioItem = NSMenuItem(
+            title: "短音频阈值: \(String(format: "%.1f", settings.shortAudioThreshold))s",
+            action: #selector(setShortAudioThreshold),
+            keyEquivalent: ""
+        )
+        shortAudioItem.target = self
+        llmMenu.addItem(shortAudioItem)
+
         llmMenu.addItem(.separator())
 
         // 预设方案（动态生成，带 ✅ 标记和配置状态）
@@ -759,6 +775,46 @@ final class StatusBarController {
                 if let val = Double(input.stringValue), val > 0 {
                     self?.settings.llmTimeout = val
                     fputs("[StatusBar] LLM Timeout: \(val)s\n", stderr)
+                }
+            }
+        }
+    }
+
+    @objc private func setLLMMinTextLength() {
+        DispatchQueue.main.async { [weak self] in
+            let alert = NSAlert()
+            alert.messageText = "LLM 最短文本长度"
+            alert.informativeText = "低于此长度的文本跳过 LLM 处理。\n默认 5 字符。设为 1 = 所有文本都过 LLM。"
+            alert.addButton(withTitle: "保存")
+            alert.addButton(withTitle: "取消")
+            let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
+            input.stringValue = "\(self?.settings.llmMinTextLength ?? 5)"
+            alert.accessoryView = input
+            NSApp.activate(ignoringOtherApps: true)
+            if alert.runModal() == .alertFirstButtonReturn {
+                if let val = Int(input.stringValue), val >= 1 {
+                    self?.settings.llmMinTextLength = val
+                    fputs("[StatusBar] LLM 最短文本: \(val) 字符\n", stderr)
+                }
+            }
+        }
+    }
+
+    @objc private func setShortAudioThreshold() {
+        DispatchQueue.main.async { [weak self] in
+            let alert = NSAlert()
+            alert.messageText = "短音频阈值（秒）"
+            alert.informativeText = "低于此时长的音频直接走 Whisper。\n默认 2.0s。设为 0 = 关闭短音频路由。\n增大此值可让更多音频走 Whisper。"
+            alert.addButton(withTitle: "保存")
+            alert.addButton(withTitle: "取消")
+            let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
+            input.stringValue = String(format: "%.1f", self?.settings.shortAudioThreshold ?? 2.0)
+            alert.accessoryView = input
+            NSApp.activate(ignoringOtherApps: true)
+            if alert.runModal() == .alertFirstButtonReturn {
+                if let val = Double(input.stringValue), val >= 0 {
+                    self?.settings.shortAudioThreshold = val
+                    fputs("[StatusBar] 短音频阈值: \(val)s\n", stderr)
                 }
             }
         }

@@ -307,9 +307,10 @@ class RecognitionPipeline {
         let t0 = Date()
 
         // MARK: 短音频快速路径 — 直接走 Whisper
-        // SenseVoice 对 <2s 短音频语言检测不稳定（"SenseVoice" → "アイスボイス"）
-        if duration < 2.0 && engine.hasWhisper {
-            fputs("[Pipeline] 短音频（\(String(format: "%.1f", duration))s < 2.0s）→ Whisper 直接处理\n", stderr)
+        // SenseVoice 对短音频语言检测不稳定（"SenseVoice" → "アイスボイス"）
+        let shortThreshold = SettingsManager.shared.shortAudioThreshold
+        if duration < shortThreshold && engine.hasWhisper {
+            fputs("[Pipeline] 短音频（\(String(format: "%.1f", duration))s < \(String(format: "%.1f", shortThreshold))s）→ Whisper 直接处理\n", stderr)
             let whisperResult = engine.recognizeWithWhisper(audioData: audioData, sampleRate: 16000)
             let wText = whisperResult.text.trimmingCharacters(in: .whitespacesAndNewlines)
             let elapsed = Date().timeIntervalSince(t0)

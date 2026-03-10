@@ -32,6 +32,8 @@ final class SettingsManager {
         static let llmMaxTokens             = "llmMaxTokens"              // Int
         static let llmTemperature           = "llmTemperature"            // Double
         static let llmTimeout               = "llmTimeout"                // Double (seconds)
+        static let llmMinTextLength         = "llmMinTextLength"          // Int
+        static let shortAudioThreshold      = "shortAudioThreshold"       // Double (seconds)
     }
 
     // MARK: - LLM 预设定义
@@ -402,6 +404,24 @@ final class SettingsManager {
             return v > 0 ? v : 4.0
         }
         set { defaults.set(newValue, forKey: Keys.llmTimeout) }
+    }
+
+    /// LLM 最短文本长度（低于此长度跳过 LLM）
+    var llmMinTextLength: Int {
+        get {
+            let v = defaults.integer(forKey: Keys.llmMinTextLength)
+            return v > 0 ? v : 5
+        }
+        set { defaults.set(newValue, forKey: Keys.llmMinTextLength) }
+    }
+
+    /// 短音频阈值（秒），低于此时长的音频走 Whisper
+    var shortAudioThreshold: Double {
+        get {
+            let v = defaults.double(forKey: Keys.shortAudioThreshold)
+            return v > 0 ? v : 2.0
+        }
+        set { defaults.set(newValue, forKey: Keys.shortAudioThreshold) }
     }
 
     // MARK: - 预设配置存取

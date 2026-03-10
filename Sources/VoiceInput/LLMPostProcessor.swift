@@ -46,7 +46,9 @@ final class LLMPostProcessor {
         config.httpMaximumConnectionsPerHost = 2
         return URLSession(configuration: config)
     }()
-    private let minTextLength = 5
+    private var minTextLength: Int {
+        SettingsManager.shared.llmMinTextLength
+    }
 
     private let systemPrompt = """
 你是语音转文字的纠错工具。用户发送的文本是语音识别(ASR)的原始输出。
