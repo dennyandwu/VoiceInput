@@ -669,7 +669,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         self?.tryLoadWhisper(engine: pipeline.engine)
                     }
                     self?.showAlert(title: "Whisper 已安装",
-                        message: "英文增强模型已安装。纯英文语音将自动使用 Whisper 识别。")
+                        message: "\(model.displayName) 已安装。短音频和英文语音将自动使用 Whisper 识别。")
                 } else {
                     self?.showAlert(title: "安装失败", message: "解压后未找到 Whisper 模型文件")
                 }
@@ -677,7 +677,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         task.resume()
-        showAlert(title: "正在下载", message: "Whisper 英文增强模型（约 200MB）正在后台下载。\n完成后会自动安装并启用。")
+        let sizeHint = model == .smallEn ? "约 200MB" : "约 1GB"
+        showAlert(title: "正在下载", message: "Whisper \(model.displayName)（\(sizeHint)）正在后台下载。\n完成后会自动安装并启用。")
     }
 
     // MARK: - Float32 模型下载
