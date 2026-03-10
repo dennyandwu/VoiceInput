@@ -293,7 +293,7 @@ final class UpdateChecker {
             let mountProcess = Process()
             mountProcess.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
             mountProcess.arguments = ["attach", dmgPath, "-mountpoint", mountPoint,
-                                      "-noverify", "-nobrowse", "-noautoopen"]
+                                      "-nobrowse", "-noautoopen"]
 
             let mountPipe = Pipe()
             mountProcess.standardOutput = mountPipe
@@ -331,6 +331,19 @@ final class UpdateChecker {
             }
 
             let sourceApp = "\(mountPoint)/\(appName)"
+
+            // C2 安全检查：路径规范化 + 穿越防护
+            let resolvedSource = (sourceApp as NSString).standardizingPath
+            let resolvedMount = (mountPoint as NSString).standardizingPath
+            guard resolvedSource.hasPrefix(resolvedMount) else {
+                fputs("[UpdateChecker] ⚠️ 路径穿越检测: \(resolvedSource) 不在 \(resolvedMount) 内\n", stderr)
+                detachDMG(mountPoint: mountPoint)
+                DispatchQueue.main.async {
+                    completion(false, makeError("安全检查失败：.app 路径异常"))
+                }
+                return
+            }
+
             let destApp = currentAppPath
 
             fputs("[UpdateChecker] 替换: \(sourceApp) → \(destApp)\n", stderr)
@@ -363,6 +376,21 @@ final class UpdateChecker {
                 try fm.copyItem(atPath: sourceApp, toPath: destApp)
                 fputs("[UpdateChecker] ✅ 新版本已复制到 \(destApp)\n", stderr)
 
+                // C1 安全检查：验证代码签名
+                let codesign = Process()
+                codesign.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+                codesign.arguments = ["--verify", "--deep", "--strict", destApp]
+                let signPipe = Pipe()
+                codesign.standardError = signPipe
+                try? codesign.run()
+                codesign.waitUntilExit()
+                if codesign.terminationStatus != 0 {
+                    let signErr = String(data: signPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                    fputs("[UpdateChecker] ⚠️ 签名验证失败: \(signErr)\n", stderr)
+                    // adhoc 签名在非开发机上可能失败，记录但不阻止（等 Developer ID 后改为阻止）
+                }
+
+                // 清除 quarantine 属性（adhoc 签名需要）
                 let xattr = Process()
                 xattr.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
                 xattr.arguments = ["-r", "-d", "com.apple.quarantine", destApp]
