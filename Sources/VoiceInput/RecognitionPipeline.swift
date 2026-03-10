@@ -308,53 +308,26 @@ class RecognitionPipeline {
         let duration = Double(audioData.count) / 16000.0
         let t0 = Date()
 
-        // MARK: 短音频快速路径 — SenseVoice 优先，ja/ko 误检时 fallback Whisper
-        // Small.en 只能识别英文，不能处理中文短音频
-        // SenseVoice 对短音频中文识别准确（RTF~0.07），只有 ja/ko 误检时才需要 Whisper
+        // MARK: 短音频快速路径 — 直接走 Whisper
+        // SenseVoice 对短音频语言检测不稳定（"SenseVoice" → "アイスボイス"）
         let shortThreshold = SettingsManager.shared.shortAudioThreshold
-        if duration < shortThreshold {
-            fputs("[Pipeline] 短音频（\(String(format: "%.1f", duration))s < \(String(format: "%.1f", shortThreshold))s）→ SenseVoice 优先\n", stderr)
-
-            // 先用 SenseVoice
-            let svResult = engine.recognize(audioData: audioData, sampleRate: 16000)
-            let svText = svResult.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            let svLang = TextPostProcessor.extractLanguage(svText).isEmpty ? svResult.lang : TextPostProcessor.extractLanguage(svText)
+        if duration < shortThreshold && engine.hasWhisper {
+            fputs("[Pipeline] 短音频（\(String(format: "%.1f", duration))s < \(String(format: "%.1f", shortThreshold))s）→ Whisper 直接处理\n", stderr)
+            let whisperResult = engine.recognizeWithWhisper(audioData: audioData, sampleRate: 16000)
+            let wText = whisperResult.text.trimmingCharacters(in: .whitespacesAndNewlines)
             let elapsed = Date().timeIntervalSince(t0)
-
-            // 检查是否 ja/ko 误检
-            let isJaKo = svLang == "<|ja|>" || svLang == "<|ko|>"
-            if isJaKo && engine.hasWhisper {
-                fputs("[Pipeline] 短音频 SenseVoice 检测到 \(svLang)（可能误检）→ Whisper fallback\n", stderr)
-                let whisperResult = engine.recognizeWithWhisper(audioData: audioData, sampleRate: 16000)
-                let wText = whisperResult.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                let elapsed2 = Date().timeIntervalSince(t0)
-                if !wText.isEmpty {
-                    fputs("[Pipeline] Whisper 短音频结果: \"\(wText)\" (\(String(format: "%.3f", elapsed2))s)\n", stderr)
-                    return PipelineResult(
-                        text: wText,
-                        lang: whisperResult.lang.isEmpty ? "<|en|>" : whisperResult.lang,
-                        emotion: "", event: "",
-                        audioSamples: audioData.count,
-                        duration: duration,
-                        processingTime: elapsed2
-                    )
-                }
-                fputs("[Pipeline] Whisper 也返回空，使用 SenseVoice 结果\n", stderr)
-            }
-
-            // SenseVoice 结果可用
-            if !svText.isEmpty {
-                fputs("[Pipeline] SenseVoice 短音频结果: \"\(svText)\" lang=\(svLang) (\(String(format: "%.3f", elapsed))s)\n", stderr)
+            if !wText.isEmpty {
+                fputs("[Pipeline] Whisper 短音频结果: \"\(wText)\" (\(String(format: "%.3f", elapsed))s)\n", stderr)
                 return PipelineResult(
-                    text: svText,
-                    lang: svLang,
-                    emotion: svResult.emotion ?? "", event: svResult.event ?? "",
+                    text: wText,
+                    lang: whisperResult.lang.isEmpty ? "<|en|>" : whisperResult.lang,
+                    emotion: "", event: "",
                     audioSamples: audioData.count,
                     duration: duration,
                     processingTime: elapsed
                 )
             }
-            fputs("[Pipeline] SenseVoice 短音频返回空，继续正常流程\n", stderr)
+            fputs("[Pipeline] Whisper 短音频返回空，回退 SenseVoice\n", stderr)
         }
 
         // 第一遍：SenseVoice（快速语言检测 + 中文识别）
