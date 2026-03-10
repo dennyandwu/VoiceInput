@@ -10,7 +10,7 @@ cd "$SCRIPT_DIR"
 
 # ─── 配置 ───────────────────────────────────────────────────────────────────
 APP_NAME="VoiceInput"
-APP_VERSION="3.0.0"
+APP_VERSION="3.0.1"
 BUNDLE_ID="com.urdao.voiceinput"
 
 SHERPA_DIR="$SCRIPT_DIR/sherpa-onnx-v1.12.28-osx-universal2-shared"
@@ -148,9 +148,17 @@ info "  重新签名 Frameworks/..."
 codesign --force --options runtime --sign - "$APP_FRAMEWORKS/libonnxruntime.1.23.2.dylib" 2>&1 | grep -v "replacing existing signature" || true
 codesign --force --options runtime --sign - "$APP_FRAMEWORKS/libsherpa-onnx-c-api.dylib" 2>&1 | grep -v "replacing existing signature" || true
 
+# 先签名 dylib（要在 bundle 签名之前）
+info "  签名 Frameworks/..."
+for dylib in "$APP_FRAMEWORKS"/*.dylib; do
+    [ -f "$dylib" ] || continue
+    codesign --remove-signature "$dylib" 2>/dev/null || true
+    codesign --force --options runtime --sign - "$dylib" 2>&1 | grep -v "replacing existing signature" || true
+done
+
 # 签名整个 bundle
 info "  签名 .app bundle..."
-codesign --force --deep --options runtime --sign - "$APP_BUNDLE" 2>&1 | grep -v "replacing existing signature" || true
+codesign --force --options runtime --entitlements "$SCRIPT_DIR/VoiceInput.entitlements" --sign - "$APP_BUNDLE" 2>&1 | grep -v "replacing existing signature" || true
 
 success "代码签名完成"
 echo ""
