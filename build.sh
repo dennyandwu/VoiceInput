@@ -46,6 +46,7 @@ swiftc \
   "$SOURCES_DIR/SettingsManager.swift" \
   "$SOURCES_DIR/WordLibraryManager.swift" \
   "$SOURCES_DIR/LLMPostProcessor.swift" \
+  "$SOURCES_DIR/KeychainHelper.swift" \
   "$SOURCES_DIR/PermissionManager.swift" \
   "$SOURCES_DIR/StatusBarController.swift" \
   "$SOURCES_DIR/HotkeyRecorderWindow.swift" \
@@ -60,6 +61,8 @@ swiftc \
   -framework AVFoundation \
   -framework AppKit \
   -framework Carbon \
+  -framework Security \
+  -framework UserNotifications \
   -target arm64-apple-macosx14.0 \
   -O \
   -o "$OUTPUT"

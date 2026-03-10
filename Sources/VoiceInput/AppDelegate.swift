@@ -5,6 +5,7 @@
 
 import Foundation
 import AppKit
+import UserNotifications
 // UserNotifications requires app bundle; use osascript fallback instead
 
 /// AppDelegate 是 GUI 模式的核心协调器
@@ -392,18 +393,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - 系统通知
 
     private func requestNotificationPermission() {
-        // No-op: notifications use osascript, no permission needed
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
+            if let error = error {
+                fputs("[AppDelegate] 通知权限请求失败: \(error.localizedDescription)\n", stderr)
+            }
+            fputs("[AppDelegate] 通知权限: \(granted ? "已授权" : "未授权")\n", stderr)
+        }
     }
 
     private func sendNotification(text: String, lang: String) {
-        let title = "VoiceInput"
-        let subtitle = lang.isEmpty ? "" : "[\(lang)] "
-        let body = "\(subtitle)\(text)"
-        let script = "display notification \"\(body.replacingOccurrences(of: "\"", with: "\\\""))\" with title \"\(title)\""
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        proc.arguments = ["-e", script]
-        try? proc.run()
+        let content = UNMutableNotificationContent()
+        content.title = "VoiceInput"
+        content.body = lang.isEmpty ? text : "[\(lang)] \(text)"
+        content.sound = nil
+
+        let request = UNNotificationRequest(
+            identifier: UUID().uuidString,
+            content: content,
+            trigger: nil  // 立即发送
+        )
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error = error {
+                fputs("[AppDelegate] 通知发送失败: \(error.localizedDescription)\n", stderr)
+            }
+        }
     }
 
     // MARK: - Alert
