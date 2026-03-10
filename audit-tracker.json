@@ -1,0 +1,24 @@
+{
+  "project": "VoiceInput",
+  "auditVersion": "v2.0.0/v2.1.0",
+  "lastUpdated": "2026-03-11",
+  "issues": [
+    { "id": "C1", "severity": "CRITICAL", "title": "UpdateChecker — 无签名验证", "status": "closed", "fixedIn": "v3.0.0", "commit": "7a19ce9" },
+    { "id": "C2", "severity": "CRITICAL", "title": "UpdateChecker — 路径穿越", "status": "closed", "fixedIn": "v3.0.0", "commit": "7a19ce9" },
+    { "id": "C3", "severity": "CRITICAL", "title": "AppDelegate — AppleScript 注入", "status": "closed", "fixedIn": "v3.0.0", "commit": "a130953" },
+    { "id": "C4", "severity": "CRITICAL", "title": "SettingsManager — Plist XML 注入", "status": "closed", "fixedIn": "v3.0.0", "commit": "a130953" },
+    { "id": "C5", "severity": "CRITICAL", "title": "SettingsManager — API Key 明文存储", "status": "closed", "fixedIn": "v3.0.0", "commit": "a130953" },
+    { "id": "H1", "severity": "HIGH", "title": "UpdateChecker — 无 TLS 证书固定", "status": "closed", "fixedIn": "v3.0.0", "note": "暂缓 TLS pinning，codesign 验证替代" },
+    { "id": "H2", "severity": "HIGH", "title": "HotkeyManager — CGEvent tap passRetained 泄漏", "status": "closed", "fixedIn": "v3.0.0", "commit": "0e449f7" },
+    { "id": "H3", "severity": "HIGH", "title": "AppDelegate — retain cycle", "status": "closed", "fixedIn": "v3.0.0", "note": "确认所有闭包已使用 [weak self]" },
+    { "id": "H4", "severity": "HIGH", "title": "AppDelegate — tar Zip Slip", "status": "closed", "fixedIn": "v3.0.0", "commit": "0e449f7" },
+    { "id": "H5", "severity": "HIGH", "title": "AppDelegate — 模型下载无哈希校验", "status": "closed", "fixedIn": "v3.0.0", "commit": "f2259c9", "note": "文件大小验证" },
+    { "id": "H6", "severity": "HIGH", "title": "RecognitionPipeline — Thread.sleep 主线程", "status": "closed", "fixedIn": "v3.0.0", "commit": "0e449f7" },
+    { "id": "H7", "severity": "HIGH", "title": "LLMPostProcessor — HTTP Header 注入", "status": "closed", "fixedIn": "v3.0.0", "commit": "0e449f7" },
+    { "id": "H8", "severity": "HIGH", "title": "LLMPostProcessor — 日志隐私泄露", "status": "closed", "fixedIn": "v3.0.0", "commit": "0e449f7" },
+    { "id": "H9", "severity": "HIGH", "title": "LLMPostProcessor — LLM prompt 劫持", "status": "closed", "fixedIn": "v2.2.2" },
+    { "id": "H10", "severity": "HIGH", "title": "TextInjector — CGEvent 焦点检查", "status": "closed", "fixedIn": "v3.0.0", "commit": "f2259c9" },
+    { "id": "H11", "severity": "HIGH", "title": "UpdateChecker — URLSession 泄漏", "status": "closed", "fixedIn": "v3.0.0", "commit": "0e449f7" },
+    { "id": "CI1", "severity": "MEDIUM", "title": "CI workflow 缺少编译步骤", "status": "closed", "fixedIn": "v3.0.0", "commit": "82d9117" }
+  ]
+}
