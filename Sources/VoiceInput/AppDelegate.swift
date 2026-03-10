@@ -313,19 +313,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let allowed = settings.allowedLanguages
         let filtered = TextPostProcessor.filterByLanguage(cleanedText.isEmpty ? rawText : cleanedText, detectedLang: lang, allowed: allowed)
         lang = filtered.lang
+        let filteredText = filtered.text  // 使用过滤后的文本（日语假名等已清除）
         let langName = TextPostProcessor.languageName(lang)
 
-        // 优先用清理后文本，若清理后为空但原文有内容则用原文（去 token 后）
+        // 优先用过滤后文本，若为空但原文有内容则用原文（去 token 后）
         var processedText: String
-        if !cleanedText.isEmpty {
-            processedText = cleanedText
+        if !filteredText.isEmpty && filteredText.count > 1 {
+            processedText = filteredText
         } else {
             // 去掉 SenseVoice token 但保留原始内容
             let stripped = rawText.replacingOccurrences(of: #"<\|[^|]+\|>"#, with: "", options: .regularExpression)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            if stripped.count > 1 {
-                processedText = stripped
-                fputs("[AppDelegate] ℹ️ PostProcessor 过滤了原文，降级使用去 token 文本: \"\(stripped)\"\n", stderr)
+            // 对降级文本也做语言过滤
+            let strippedFiltered = TextPostProcessor.filterByLanguage(stripped, detectedLang: lang, allowed: allowed).text
+            let finalStripped = strippedFiltered.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+            if !finalStripped.isEmpty {
+                processedText = strippedFiltered
+                fputs("[AppDelegate] ℹ️ PostProcessor 过滤了原文，降级使用去 token 文本: \"\(strippedFiltered)\"\n", stderr)
             } else {
                 fputs("[AppDelegate] ℹ️ 识别结果为空或无意义（原文: \"\(rawText)\"）\n", stderr)
                 recordingOverlay.setStatus("未检测到有效语音")
