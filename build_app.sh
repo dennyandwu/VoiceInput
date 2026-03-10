@@ -141,24 +141,23 @@ echo ""
 info "步骤 5/7: ad-hoc 代码签名..."
 
 # 先签名 dylib（要在 bundle 签名之前）
-info "  移除 Frameworks 原始签名..."
-codesign --remove-signature "$APP_FRAMEWORKS/libonnxruntime.1.23.2.dylib" 2>/dev/null || true
-codesign --remove-signature "$APP_FRAMEWORKS/libsherpa-onnx-c-api.dylib" 2>/dev/null || true
-info "  重新签名 Frameworks/..."
-codesign --force --options runtime --sign - "$APP_FRAMEWORKS/libonnxruntime.1.23.2.dylib" 2>&1 | grep -v "replacing existing signature" || true
-codesign --force --options runtime --sign - "$APP_FRAMEWORKS/libsherpa-onnx-c-api.dylib" 2>&1 | grep -v "replacing existing signature" || true
-
-# 先签名 dylib（要在 bundle 签名之前）
-info "  签名 Frameworks/..."
+info "  移除所有 Frameworks 原始签名..."
 for dylib in "$APP_FRAMEWORKS"/*.dylib; do
     [ -f "$dylib" ] || continue
     codesign --remove-signature "$dylib" 2>/dev/null || true
-    codesign --force --options runtime --sign - "$dylib" 2>&1 | grep -v "replacing existing signature" || true
+    info "    已移除: $(basename "$dylib")"
 done
 
-# 签名整个 bundle
+info "  重新签名 Frameworks（无 hardened runtime）..."
+for dylib in "$APP_FRAMEWORKS"/*.dylib; do
+    [ -f "$dylib" ] || continue
+    codesign --force --sign - "$dylib" 2>&1 | grep -v "replacing existing signature" || true
+    info "    已签名: $(basename "$dylib")"
+done
+
+# 签名整个 bundle（deep 确保一致性）
 info "  签名 .app bundle..."
-codesign --force --options runtime --entitlements "$SCRIPT_DIR/VoiceInput.entitlements" --sign - "$APP_BUNDLE" 2>&1 | grep -v "replacing existing signature" || true
+codesign --force --deep --sign - "$APP_BUNDLE" 2>&1 | grep -v "replacing existing signature" || true
 
 success "代码签名完成"
 echo ""
