@@ -141,7 +141,10 @@ echo ""
 info "步骤 5/7: ad-hoc 代码签名..."
 
 # 先签名 dylib（要在 bundle 签名之前）
-info "  签名 Frameworks/..."
+info "  移除 Frameworks 原始签名..."
+codesign --remove-signature "$APP_FRAMEWORKS/libonnxruntime.1.23.2.dylib" 2>/dev/null || true
+codesign --remove-signature "$APP_FRAMEWORKS/libsherpa-onnx-c-api.dylib" 2>/dev/null || true
+info "  重新签名 Frameworks/..."
 codesign --force --options runtime --sign - "$APP_FRAMEWORKS/libonnxruntime.1.23.2.dylib" 2>&1 | grep -v "replacing existing signature" || true
 codesign --force --options runtime --sign - "$APP_FRAMEWORKS/libsherpa-onnx-c-api.dylib" 2>&1 | grep -v "replacing existing signature" || true
 
