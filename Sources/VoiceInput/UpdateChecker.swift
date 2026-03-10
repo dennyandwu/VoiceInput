@@ -502,6 +502,8 @@ private class DownloadDelegate: NSObject, URLSessionDownloadDelegate {
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        // H11: invalidate session 防内存泄漏
+        session.finishTasksAndInvalidate()
         if let error = error {
             DispatchQueue.main.async { [self] in
                 completionHandler(false, error)

@@ -103,9 +103,10 @@ final class LLMPostProcessor {
                 fputs("[LLM] ⚠️ 安全拦截：输出长度异常（原文\(text.count)字 → \(result.count)字，比率\(String(format: "%.1f", lenRatio))），放弃 LLM 结果\n", stderr)
                 return text
             }
-            fputs("[LLM] 修正: \"\(text)\" → \"\(result)\"\n", stderr)
+            // H8: 日志只记录长度和是否修改，不记录完整文本（隐私）
+            fputs("[LLM] 修正: \(text.count)字 → \(result.count)字\n", stderr)
         } else {
-            fputs("[LLM] 无变化: \"\(text)\"\n", stderr)
+            fputs("[LLM] 无变化 (\(text.count)字)\n", stderr)
         }
 
         return result
@@ -132,7 +133,8 @@ final class LLMPostProcessor {
     /// 核心 API 调用（URLSession，纯 Foundation）
     private func callAPI(text: String, completion: @escaping (String) -> Void) {
         let startTime = Date()
-        let key = apiKey
+        // H7: 清理 API Key 中的换行符防止 HTTP Header 注入
+        let key = apiKey.replacingOccurrences(of: "\n", with: "").replacingOccurrences(of: "\r", with: "")
         let baseURL = apiBaseURL.hasSuffix("/") ? String(apiBaseURL.dropLast()) : apiBaseURL
         let endpoint = "\(baseURL)/chat/completions"
 

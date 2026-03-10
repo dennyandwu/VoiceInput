@@ -213,6 +213,8 @@ class RecognitionPipeline {
             return PipelineResult(text: "", lang: "", emotion: "", event: "", audioSamples: 0, duration: 0, processingTime: 0)
         }
 
+        // H6: 确保不在主线程 sleep
+        assert(!Thread.isMainThread, "recordAndRecognize 不应在主线程调用")
         Thread.sleep(forTimeInterval: duration)
 
         let result = stopListening()

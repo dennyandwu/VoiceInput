@@ -634,6 +634,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let enumerator = fm.enumerator(at: extractDir, includingPropertiesForKeys: nil) {
                     for case let fileURL as URL in enumerator {
                         let name = fileURL.lastPathComponent
+                        // H4: 路径验证防 Zip Slip
+                        let resolved = fileURL.standardizedFileURL.path
+                        guard resolved.hasPrefix(extractDir.path) else {
+                            fputs("[AppDelegate] ⚠️ 路径穿越检测，跳过: \(resolved)\n", stderr)
+                            continue
+                        }
                         // 复制所有 .onnx 和 tokens.txt 文件
                         if name.hasSuffix(".onnx") || name.contains("tokens") {
                             let destPath = (whisperDir as NSString).appendingPathComponent(name)
