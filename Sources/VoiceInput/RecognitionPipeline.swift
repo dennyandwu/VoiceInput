@@ -306,6 +306,27 @@ class RecognitionPipeline {
         let duration = Double(audioData.count) / 16000.0
         let t0 = Date()
 
+        // MARK: 短音频快速路径 — 直接走 Whisper
+        // SenseVoice 对 <2s 短音频语言检测不稳定（"SenseVoice" → "アイスボイス"）
+        if duration < 2.0 && engine.hasWhisper {
+            fputs("[Pipeline] 短音频（\(String(format: "%.1f", duration))s < 2.0s）→ Whisper 直接处理\n", stderr)
+            let whisperResult = engine.recognizeWithWhisper(audioData: audioData, sampleRate: 16000)
+            let wText = whisperResult.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let elapsed = Date().timeIntervalSince(t0)
+            if !wText.isEmpty {
+                fputs("[Pipeline] Whisper 短音频结果: \"\(wText)\" (\(String(format: "%.3f", elapsed))s)\n", stderr)
+                return PipelineResult(
+                    text: wText,
+                    lang: whisperResult.lang.isEmpty ? "<|en|>" : whisperResult.lang,
+                    emotion: "", event: "",
+                    audioSamples: audioData.count,
+                    duration: duration,
+                    processingTime: elapsed
+                )
+            }
+            fputs("[Pipeline] Whisper 短音频返回空，回退 SenseVoice\n", stderr)
+        }
+
         // 第一遍：SenseVoice（快速语言检测 + 中文识别）
         let senseVoiceResult = engine.recognize(audioData: audioData, sampleRate: 16000)
         let detectedLang = TextPostProcessor.extractLanguage(senseVoiceResult.text).isEmpty
