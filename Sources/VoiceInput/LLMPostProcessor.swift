@@ -47,7 +47,7 @@ final class LLMPostProcessor {
         return URLSession(configuration: config)
     }()
     private var minTextLength: Int {
-        SettingsManager.shared.llmMinTextLength
+        ConfigManager.shared.getInt("llm.minTextLength", default: 5)
     }
 
     private let systemPrompt = """

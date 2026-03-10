@@ -399,7 +399,7 @@ class RecognitionPipeline {
 
         } else {
             // c. 中英混合（20%-80%）
-            if engine.hasWhisper && svASCII >= 0.25 {
+            if engine.hasWhisper && svASCII >= ConfigManager.shared.getDouble("routing.asciiMinForWhisper", default: 0.25) {
                 // 英文占比 ≥25% 才值得调用 Whisper
                 fputs("[Pipeline] 路由: 中英混合（ascii=\(String(format: "%.0f%%", svASCII * 100))）→ Whisper 优先，校验中文保留\n", stderr)
                 let whisperResult = engine.recognizeWithWhisper(audioData: audioData, sampleRate: 16000)
@@ -409,7 +409,7 @@ class RecognitionPipeline {
                 fputs("[Pipeline] Whisper: zh=\(String(format: "%.1f%%", wChinese * 100)), text=\"\(wText)\"\n", stderr)
 
                 // Whisper 结果中文比例 >= SenseVoice 的 50%：Whisper 保留了足够多的中文 → 用 Whisper
-                let threshold = svChinese * 0.5
+                let threshold = svChinese * ConfigManager.shared.getDouble("routing.mixedChineseRetention", default: 0.5)
                 if !wText.isEmpty && wChinese >= threshold {
                     fputs("[Pipeline] Whisper 中文保留率 OK（\(String(format: "%.1f%%", wChinese * 100)) >= \(String(format: "%.1f%%", threshold * 100))），采用 Whisper\n", stderr)
                     finalResult = whisperResult
@@ -470,8 +470,9 @@ class RecognitionPipeline {
     private func dominantLanguage(_ text: String) -> String {
         let zh = chineseRatio(text)
         let en = asciiRatio(text)
-        if zh > 0.7 { return "zh" }
-        if en > 0.8 { return "en" }
+        let cfg = ConfigManager.shared
+        if zh > cfg.getDouble("routing.zhThreshold", default: 0.7) { return "zh" }
+        if en > cfg.getDouble("routing.enThreshold", default: 0.8) { return "en" }
         return "mixed"
     }
 }

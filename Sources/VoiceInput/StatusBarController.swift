@@ -509,6 +509,17 @@ final class StatusBarController {
 
         menu.addItem(.separator())
 
+        // ─── 配置文件 ─────────────────────────────────────
+        let openConfigItem = NSMenuItem(title: "📂 打开配置文件", action: #selector(openConfigFile), keyEquivalent: "")
+        openConfigItem.target = self
+        menu.addItem(openConfigItem)
+
+        let reloadConfigItem = NSMenuItem(title: "🔄 重新加载配置", action: #selector(reloadConfig), keyEquivalent: "")
+        reloadConfigItem.target = self
+        menu.addItem(reloadConfigItem)
+
+        menu.addItem(.separator())
+
         // ─── 检查更新 ─────────────────────────────────────
         let updateItem = NSMenuItem(
             title: "检查更新...",
@@ -613,6 +624,20 @@ final class StatusBarController {
     @objc private func toggleLaunchAtLogin() {
         settings.launchAtLogin = !settings.launchAtLogin
         fputs("[StatusBar] 开机启动: \(settings.launchAtLogin)\n", stderr)
+    }
+
+    @objc private func openConfigFile() {
+        let path = ConfigManager.configPath
+        // 确保配置文件存在
+        if !FileManager.default.fileExists(atPath: path) {
+            ConfigManager.shared.reload()
+        }
+        NSWorkspace.shared.open(URL(fileURLWithPath: path))
+    }
+
+    @objc private func reloadConfig() {
+        ConfigManager.shared.reload()
+        fputs("[StatusBar] 配置已重新加载\n", stderr)
     }
 
     @objc private func quitApp() {

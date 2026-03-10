@@ -84,6 +84,12 @@ elif [ -f "/tmp/AppIcon.icns" ]; then
     cp "/tmp/AppIcon.icns" "$APP_RESOURCES/AppIcon.icns"
 else
     warn "  AppIcon.icns 不存在，跳过（使用系统默认图标）"
+
+# 3e. 默认配置文件
+if [ -f "$SCRIPT_DIR/Resources/default-config.json" ]; then
+    info "  复制默认配置..."
+    cp "$SCRIPT_DIR/Resources/default-config.json" "$APP_RESOURCES/default-config.json"
+fi
     # 去掉 Info.plist 中的 CFBundleIconFile 键（不影响运行）
 fi
 

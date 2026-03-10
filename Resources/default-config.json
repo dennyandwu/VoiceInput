@@ -1,0 +1,45 @@
+{
+    "_comment": "VoiceInput 配置文件 — 修改后重启应用生效",
+    "_version": "1.0",
+
+    "asr": {
+        "_comment": "语音识别引擎参数",
+        "languageMode": "auto",
+        "shortAudioThreshold": 2.0,
+        "modelType": "int8"
+    },
+
+    "routing": {
+        "_comment": "双引擎路由阈值",
+        "zhThreshold": 0.7,
+        "enThreshold": 0.8,
+        "asciiMinForWhisper": 0.25,
+        "mixedChineseRetention": 0.5,
+        "whisperModel": "small.en"
+    },
+
+    "vad": {
+        "_comment": "语音活动检测",
+        "minSpeechDuration": 0.3,
+        "silenceThreshold": 0.5
+    },
+
+    "llm": {
+        "_comment": "LLM 后处理参数",
+        "enabled": false,
+        "minTextLength": 5,
+        "maxTokens": 200,
+        "temperature": 0.1,
+        "timeout": 4.0,
+        "apiBaseURL": "https://api.openai.com/v1",
+        "model": "gpt-4o-mini",
+        "activePreset": ""
+    },
+
+    "ui": {
+        "_comment": "界面与交互",
+        "showNotification": true,
+        "hotkeyMode": "ptt",
+        "launchAtLogin": false
+    }
+}
