@@ -145,9 +145,14 @@ info "  签名 Frameworks/..."
 codesign --force --options runtime --sign - "$APP_FRAMEWORKS/libonnxruntime.1.23.2.dylib" 2>&1 | grep -v "replacing existing signature" || true
 codesign --force --options runtime --sign - "$APP_FRAMEWORKS/libsherpa-onnx-c-api.dylib" 2>&1 | grep -v "replacing existing signature" || true
 
-# 签名整个 bundle
+# 签名所有 Frameworks 下的 dylib（确保无遗漏）
+for dylib in "$APP_FRAMEWORKS"/*.dylib; do
+    [ -f "$dylib" ] && codesign --force --options runtime --sign - "$dylib" 2>&1 | grep -v "replacing existing signature" || true
+done
+
+# 签名整个 bundle（不用 --deep，避免覆盖 framework 签名导致 Team ID 不一致）
 info "  签名 .app bundle..."
-codesign --force --deep --options runtime --sign - "$APP_BUNDLE" 2>&1 | grep -v "replacing existing signature" || true
+codesign --force --options runtime --sign - "$APP_BUNDLE" 2>&1 | grep -v "replacing existing signature" || true
 
 success "代码签名完成"
 echo ""
