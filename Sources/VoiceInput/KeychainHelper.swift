@@ -2,6 +2,8 @@ import Foundation
 import Security
 
 /// 简单的 Keychain 存取封装
+/// 使用 Data Protection Keychain (kSecUseDataProtectionKeychain)
+/// 避免 ad-hoc 签名应用弹出 Keychain 授权弹窗
 enum KeychainHelper {
 
     static func set(_ value: String, service: String, account: String) {
@@ -15,7 +17,8 @@ enum KeychainHelper {
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
             kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+            kSecUseDataProtectionKeychain as String: true
         ]
 
         let status = SecItemAdd(query as CFDictionary, nil)
@@ -30,7 +33,8 @@ enum KeychainHelper {
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
             kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
+            kSecMatchLimit as String: kSecMatchLimitOne,
+            kSecUseDataProtectionKeychain as String: true
         ]
 
         var result: AnyObject?
@@ -47,8 +51,17 @@ enum KeychainHelper {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account
+            kSecAttrAccount as String: account,
+            kSecUseDataProtectionKeychain as String: true
         ]
         SecItemDelete(query as CFDictionary)
+
+        // 也清理旧的 legacy keychain 条目（迁移用）
+        let legacyQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+        SecItemDelete(legacyQuery as CFDictionary)
     }
 }
