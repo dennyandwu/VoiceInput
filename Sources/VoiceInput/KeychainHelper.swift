@@ -28,6 +28,7 @@ enum KeychainHelper {
     }
 
     static func get(service: String, account: String) -> String? {
+        // 优先从 Data Protection Keychain 读取
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -40,11 +41,34 @@ enum KeychainHelper {
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
 
-        guard status == errSecSuccess, let data = result as? Data,
-              let value = String(data: data, encoding: .utf8) else {
-            return nil
+        if status == errSecSuccess, let data = result as? Data,
+           let value = String(data: data, encoding: .utf8) {
+            return value
         }
-        return value
+
+        // Fallback: 从 legacy Keychain 读取（v3.0.2 及之前存的 key）
+        let legacyQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+
+        var legacyResult: AnyObject?
+        let legacyStatus = SecItemCopyMatching(legacyQuery as CFDictionary, &legacyResult)
+
+        if legacyStatus == errSecSuccess, let data = legacyResult as? Data,
+           let value = String(data: data, encoding: .utf8) {
+            // 自动迁移到 Data Protection Keychain
+            set(value, service: service, account: account)
+            // 删除 legacy 条目
+            SecItemDelete(legacyQuery as CFDictionary)
+            fputs("[Keychain] 已从 legacy keychain 迁移: \(account)\n", stderr)
+            return value
+        }
+
+        return nil
     }
 
     static func delete(service: String, account: String) {

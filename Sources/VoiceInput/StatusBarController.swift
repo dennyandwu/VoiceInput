@@ -518,6 +518,10 @@ final class StatusBarController {
         reloadConfigItem.target = self
         menu.addItem(reloadConfigItem)
 
+        let openWordLibItem = NSMenuItem(title: "📖 查看词库", action: #selector(openWordLibrary), keyEquivalent: "")
+        openWordLibItem.target = self
+        menu.addItem(openWordLibItem)
+
         menu.addItem(.separator())
 
         // ─── 检查更新 ─────────────────────────────────────
@@ -638,6 +642,41 @@ final class StatusBarController {
     @objc private func reloadConfig() {
         ConfigManager.shared.reload()
         fputs("[StatusBar] 配置已重新加载\n", stderr)
+    }
+
+    @objc private func openWordLibrary() {
+        // 导出词库为可读文本并用 TextEdit 打开
+        let dbPath = WordLibraryManager.databasePath
+        guard FileManager.default.fileExists(atPath: dbPath) else {
+            fputs("[StatusBar] 词库文件不存在: \(dbPath)\n", stderr)
+            return
+        }
+
+        // 导出到临时文件
+        let exportPath = NSTemporaryDirectory() + "VoiceInput-词库.txt"
+        var content = "VoiceInput 词库导出\n"
+        content += "路径: \(dbPath)\n"
+        content += "时间: \(ISO8601DateFormatter().string(from: Date()))\n"
+        content += String(repeating: "─", count: 60) + "\n\n"
+
+        // 读取 corrections 表
+        let corrections = WordLibraryManager.shared.getAllCorrections()
+        content += "【自动修正词条】共 \(corrections.count) 条\n"
+        content += String(format: "%-20s → %-20s  权重\n", "原文", "修正")
+        content += String(repeating: "─", count: 60) + "\n"
+        for c in corrections {
+            content += "\(c.original) → \(c.correction)  [\(c.weight)]\n"
+        }
+
+        do {
+            try content.write(toFile: exportPath, atomically: true, encoding: .utf8)
+            NSWorkspace.shared.open(URL(fileURLWithPath: exportPath))
+            fputs("[StatusBar] 词库已导出: \(exportPath)\n", stderr)
+        } catch {
+            fputs("[StatusBar] 导出词库失败: \(error)\n", stderr)
+            // fallback: 直接用 Finder 打开 sqlite 文件所在目录
+            NSWorkspace.shared.selectFile(dbPath, inFileViewerRootedAtPath: "")
+        }
     }
 
     @objc private func quitApp() {

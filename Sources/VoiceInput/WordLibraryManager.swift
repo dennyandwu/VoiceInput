@@ -18,14 +18,14 @@ final class WordLibraryManager {
 
     // MARK: - Private State
 
-    private var db: OpaquePointer?
-    private let lock = NSLock()
-
     /// 数据库文件路径：~/Library/Application Support/VoiceInput/wordlibrary.sqlite
-    private let dbPath: String = {
+    static let databasePath: String = {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return "\(home)/Library/Application Support/VoiceInput/wordlibrary.sqlite"
     }()
+
+    private var db: OpaquePointer?
+    private let lock = NSLock()
 
     // MARK: - Init / Deinit
 
@@ -46,7 +46,7 @@ final class WordLibraryManager {
     // MARK: - Setup
 
     private func ensureDirectoryExists() {
-        let dir = (dbPath as NSString).deletingLastPathComponent
+        let dir = (Self.databasePath as NSString).deletingLastPathComponent
         do {
             try FileManager.default.createDirectory(
                 atPath: dir,
@@ -59,13 +59,13 @@ final class WordLibraryManager {
     }
 
     private func openDatabase() {
-        let result = sqlite3_open(dbPath, &db)
+        let result = sqlite3_open(Self.databasePath, &db)
         if result != SQLITE_OK {
             let msg = db != nil ? String(cString: sqlite3_errmsg(db)) : "unknown error"
-            fputs("[WordLibrary] Failed to open database at \(dbPath): \(msg)\n", stderr)
+            fputs("[WordLibrary] Failed to open database at \(Self.databasePath): \(msg)\n", stderr)
             db = nil
         } else {
-            fputs("[WordLibrary] Database opened at \(dbPath)\n", stderr)
+            fputs("[WordLibrary] Database opened at \(Self.databasePath)\n", stderr)
             // 开启 WAL 模式提升并发写入性能
             execute("PRAGMA journal_mode=WAL;")
             // 外键约束
