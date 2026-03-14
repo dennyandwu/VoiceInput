@@ -1,39 +1,71 @@
 // Sources/VoiceInput/SettingsManager.swift
-// 用户设置管理 - UserDefaults 持久化
+// 用户设置管理 - 统一代理到 ConfigManager（Single Source of Truth）
 // Phase 4: MenuBar GUI
 // Copyright (c) 2026 urDAO Investment
+//
+// 架构说明：
+// - 所有配置读写统一走 ConfigManager（config.json）
+// - UserDefaults 仅保留 triggerKeyCode（热键）
+// - API Key 继续使用 Keychain（安全）
+// - 升级时一次性迁移旧 UserDefaults 数据到 ConfigManager
 
 import Foundation
 import AppKit
 
-/// SettingsManager 管理应用所有用户设置，持久化到 UserDefaults
+/// SettingsManager 管理应用所有用户设置
+/// 持久化层：ConfigManager (config.json) 作为 single source of truth
 final class SettingsManager {
 
     // MARK: - Singleton
 
     static let shared = SettingsManager()
 
-    // MARK: - UserDefaults Keys
+    // MARK: - UserDefaults Keys（仅保留热键 + 迁移标记）
 
     private enum Keys {
-        static let hotkeyMode      = "voiceinput.hotkeyMode"      // "ptt" / "toggle"
+        // 热键 keyCode 仍用 UserDefaults（不属于 config.json 范畴）
         static let triggerKeyCode  = "voiceinput.triggerKeyCode"   // UInt16
-        static let modelType       = "voiceinput.modelType"        // "int8" / "float32"
-        static let languageMode    = "voiceinput.languageMode"      // "auto" / "zh" / "en" / "zh+en"
-        static let launchAtLogin   = "voiceinput.launchAtLogin"    // Bool
-        static let showNotification = "voiceinput.showNotification" // Bool
-        // LLM 后处理
-        static let llmPostProcessingEnabled = "llmPostProcessingEnabled" // Bool
-        static let llmApiKey                = "llmApiKey"                // String
-        static let llmApiBaseURL            = "llmApiBaseURL"            // String
-        static let llmModel                 = "llmModel"                 // String
-        static let llmActivePreset          = "llmActivePreset"          // String
-        static let whisperModel             = "whisperModel"              // "small.en" / "large-v3"
-        static let llmMaxTokens             = "llmMaxTokens"              // Int
-        static let llmTemperature           = "llmTemperature"            // Double
-        static let llmTimeout               = "llmTimeout"                // Double (seconds)
-        static let llmMinTextLength         = "llmMinTextLength"          // Int
-        static let shortAudioThreshold      = "shortAudioThreshold"       // Double (seconds)
+
+        // 旧 UserDefaults key（仅用于迁移读取）
+        static let hotkeyMode      = "voiceinput.hotkeyMode"
+        static let modelType       = "voiceinput.modelType"
+        static let languageMode    = "voiceinput.languageMode"
+        static let launchAtLogin   = "voiceinput.launchAtLogin"
+        static let showNotification = "voiceinput.showNotification"
+        static let llmPostProcessingEnabled = "llmPostProcessingEnabled"
+        static let llmApiKey                = "llmApiKey"
+        static let llmApiBaseURL            = "llmApiBaseURL"
+        static let llmModel                 = "llmModel"
+        static let llmActivePreset          = "llmActivePreset"
+        static let whisperModel             = "whisperModel"
+        static let llmMaxTokens             = "llmMaxTokens"
+        static let llmTemperature           = "llmTemperature"
+        static let llmTimeout               = "llmTimeout"
+        static let llmMinTextLength         = "llmMinTextLength"
+        static let shortAudioThreshold      = "shortAudioThreshold"
+
+        // 迁移标记
+        static let configMigrated = "voiceinput.configMigrated"
+    }
+
+    // MARK: - ConfigManager Key Mapping（UserDefaults key → config.json dot-path）
+
+    private enum ConfigKeys {
+        static let hotkeyMode               = "ui.hotkeyMode"
+        static let modelType                = "asr.modelType"
+        static let languageMode             = "asr.languageMode"
+        static let launchAtLogin            = "ui.launchAtLogin"
+        static let showNotification         = "ui.showNotification"
+        static let llmPostProcessingEnabled = "llm.enabled"
+        static let llmApiBaseURL            = "llm.apiBaseURL"
+        static let llmModel                 = "llm.model"
+        static let llmActivePreset          = "llm.activePreset"
+        static let whisperModel             = "routing.whisperModel"
+        static let llmMaxTokens             = "llm.maxTokens"
+        static let llmTemperature           = "llm.temperature"
+        static let llmTimeout               = "llm.timeout"
+        static let llmMinTextLength         = "llm.minTextLength"
+        static let shortAudioThreshold      = "asr.shortAudioThreshold"
     }
 
     // MARK: - LLM 预设定义
@@ -65,11 +97,11 @@ final class SettingsManager {
     // MARK: - Init
 
     private init() {
-        registerDefaults()
         migrateApiKeyToKeychain()
+        migrateUserDefaultsToConfig()
     }
 
-    /// 迁移明文 API Key 从 UserDefaults 到 Keychain
+    /// 迁移明文 API Key 从 UserDefaults 到 Keychain（旧版兼容）
     private func migrateApiKeyToKeychain() {
         if let oldKey = defaults.string(forKey: Keys.llmApiKey), !oldKey.isEmpty {
             if KeychainHelper.get(service: "com.urdao.voiceinput", account: "llmApiKey") == nil {
@@ -80,21 +112,98 @@ final class SettingsManager {
         }
     }
 
-    /// 注册默认值（仅在 key 不存在时生效）
-    private func registerDefaults() {
-        defaults.register(defaults: [
-            Keys.hotkeyMode:       "ptt",
-            Keys.triggerKeyCode:   UInt16(0x3D),   // 右 Option
-            Keys.modelType:        "int8",
-            Keys.languageMode:     "zh+en",        // 默认中英双语
-            Keys.launchAtLogin:    false,
-            Keys.showNotification: true,
-            // LLM 后处理默认值
-            Keys.llmPostProcessingEnabled: false,
-            Keys.llmApiKey:                "",
-            Keys.llmApiBaseURL:            "https://api.openai.com/v1",
-            Keys.llmModel:                 "gpt-4o-mini",
-        ])
+    /// 一次性迁移：将旧 UserDefaults 配置迁移到 ConfigManager
+    /// 检查 voiceinput.configMigrated flag，未迁移则执行一次
+    private func migrateUserDefaultsToConfig() {
+        // 已迁移则跳过
+        guard !defaults.bool(forKey: Keys.configMigrated) else {
+            fputs("[Settings] 配置已迁移，跳过\n", stderr)
+            return
+        }
+
+        fputs("[Settings] 开始迁移 UserDefaults 配置到 ConfigManager...\n", stderr)
+        let cfg = ConfigManager.shared
+
+        // hotkeyMode
+        if let v = defaults.string(forKey: Keys.hotkeyMode), !v.isEmpty {
+            cfg.set(ConfigKeys.hotkeyMode, value: v)
+        }
+        // modelType
+        if let v = defaults.string(forKey: Keys.modelType), !v.isEmpty {
+            cfg.set(ConfigKeys.modelType, value: v)
+        }
+        // languageMode
+        if let v = defaults.string(forKey: Keys.languageMode), !v.isEmpty {
+            cfg.set(ConfigKeys.languageMode, value: v)
+        }
+        // launchAtLogin（UserDefaults.bool 默认返回 false，只迁移显式设置过的值）
+        if defaults.object(forKey: Keys.launchAtLogin) != nil {
+            cfg.set(ConfigKeys.launchAtLogin, value: defaults.bool(forKey: Keys.launchAtLogin))
+        }
+        // showNotification（同上）
+        if defaults.object(forKey: Keys.showNotification) != nil {
+            cfg.set(ConfigKeys.showNotification, value: defaults.bool(forKey: Keys.showNotification))
+        }
+        // llmPostProcessingEnabled
+        if defaults.object(forKey: Keys.llmPostProcessingEnabled) != nil {
+            cfg.set(ConfigKeys.llmPostProcessingEnabled, value: defaults.bool(forKey: Keys.llmPostProcessingEnabled))
+        }
+        // llmApiBaseURL
+        if let v = defaults.string(forKey: Keys.llmApiBaseURL), !v.isEmpty {
+            cfg.set(ConfigKeys.llmApiBaseURL, value: v)
+        }
+        // llmModel
+        if let v = defaults.string(forKey: Keys.llmModel), !v.isEmpty {
+            cfg.set(ConfigKeys.llmModel, value: v)
+        }
+        // llmActivePreset
+        if let v = defaults.string(forKey: Keys.llmActivePreset), !v.isEmpty {
+            cfg.set(ConfigKeys.llmActivePreset, value: v)
+        }
+        // whisperModel
+        if let v = defaults.string(forKey: Keys.whisperModel), !v.isEmpty {
+            cfg.set(ConfigKeys.whisperModel, value: v)
+        }
+        // llmMaxTokens
+        if defaults.object(forKey: Keys.llmMaxTokens) != nil {
+            let v = defaults.integer(forKey: Keys.llmMaxTokens)
+            if v > 0 { cfg.set(ConfigKeys.llmMaxTokens, value: v) }
+        }
+        // llmTemperature
+        if defaults.object(forKey: Keys.llmTemperature) != nil {
+            let v = defaults.double(forKey: Keys.llmTemperature)
+            if v > 0 { cfg.set(ConfigKeys.llmTemperature, value: v) }
+        }
+        // llmTimeout
+        if defaults.object(forKey: Keys.llmTimeout) != nil {
+            let v = defaults.double(forKey: Keys.llmTimeout)
+            if v > 0 { cfg.set(ConfigKeys.llmTimeout, value: v) }
+        }
+        // llmMinTextLength
+        if defaults.object(forKey: Keys.llmMinTextLength) != nil {
+            let v = defaults.integer(forKey: Keys.llmMinTextLength)
+            if v > 0 { cfg.set(ConfigKeys.llmMinTextLength, value: v) }
+        }
+        // shortAudioThreshold
+        if defaults.object(forKey: Keys.shortAudioThreshold) != nil {
+            let v = defaults.double(forKey: Keys.shortAudioThreshold)
+            if v > 0 { cfg.set(ConfigKeys.shortAudioThreshold, value: v) }
+        }
+
+        // 迁移旧预设配置（UserDefaults "llm.preset.{id}.baseURL/model"）
+        for preset in Self.llmPresets {
+            let prefix = "llm.preset.\(preset.id)"
+            if let url = defaults.string(forKey: "\(prefix).baseURL"), !url.isEmpty {
+                cfg.set("presets.\(preset.id).baseURL", value: url)
+            }
+            if let model = defaults.string(forKey: "\(prefix).model"), !model.isEmpty {
+                cfg.set("presets.\(preset.id).model", value: model)
+            }
+        }
+
+        // 标记迁移完成
+        defaults.set(true, forKey: Keys.configMigrated)
+        fputs("[Settings] UserDefaults → ConfigManager 迁移完成\n", stderr)
     }
 
     // MARK: - 热键模式
@@ -102,11 +211,11 @@ final class SettingsManager {
     /// 热键触发模式：.pushToTalk 或 .toggle
     var hotkeyMode: HotkeyManager.Mode {
         get {
-            let raw = defaults.string(forKey: Keys.hotkeyMode) ?? "ptt"
+            let raw = ConfigManager.shared.getString(ConfigKeys.hotkeyMode, default: "ptt")
             return raw == "toggle" ? .toggle : .pushToTalk
         }
         set {
-            defaults.set(newValue == .toggle ? "toggle" : "ptt", forKey: Keys.hotkeyMode)
+            ConfigManager.shared.set(ConfigKeys.hotkeyMode, value: newValue == .toggle ? "toggle" : "ptt")
         }
     }
 
@@ -118,7 +227,7 @@ final class SettingsManager {
         }
     }
 
-    // MARK: - 热键 KeyCode
+    // MARK: - 热键 KeyCode（仍用 UserDefaults）
 
     /// 触发热键的虚拟 keyCode，默认右 Option (0x3D = 61)
     var triggerKeyCode: UInt16 {
@@ -152,8 +261,8 @@ final class SettingsManager {
 
     /// 使用的模型类型："int8"（快速） 或 "float32"（精确）
     var modelType: String {
-        get { defaults.string(forKey: Keys.modelType) ?? "int8" }
-        set { defaults.set(newValue, forKey: Keys.modelType) }
+        get { ConfigManager.shared.getString(ConfigKeys.modelType, default: "int8") }
+        set { ConfigManager.shared.set(ConfigKeys.modelType, value: newValue) }
     }
 
     /// 模型类型显示名称
@@ -163,8 +272,8 @@ final class SettingsManager {
 
     /// 语言模式："auto" / "zh" / "en" / "zh+en"
     var languageMode: String {
-        get { defaults.string(forKey: Keys.languageMode) ?? "zh+en" }
-        set { defaults.set(newValue, forKey: Keys.languageMode) }
+        get { ConfigManager.shared.getString(ConfigKeys.languageMode, default: "zh+en") }
+        set { ConfigManager.shared.set(ConfigKeys.languageMode, value: newValue) }
     }
 
     var languageModeName: String {
@@ -192,9 +301,9 @@ final class SettingsManager {
 
     /// 是否开机启动
     var launchAtLogin: Bool {
-        get { defaults.bool(forKey: Keys.launchAtLogin) }
+        get { ConfigManager.shared.getBool(ConfigKeys.launchAtLogin, default: false) }
         set {
-            defaults.set(newValue, forKey: Keys.launchAtLogin)
+            ConfigManager.shared.set(ConfigKeys.launchAtLogin, value: newValue)
             applyLaunchAtLogin(newValue)
         }
     }
@@ -258,20 +367,20 @@ final class SettingsManager {
 
     /// 识别完成后是否发送系统通知
     var showNotification: Bool {
-        get { defaults.bool(forKey: Keys.showNotification) }
-        set { defaults.set(newValue, forKey: Keys.showNotification) }
+        get { ConfigManager.shared.getBool(ConfigKeys.showNotification, default: true) }
+        set { ConfigManager.shared.set(ConfigKeys.showNotification, value: newValue) }
     }
 
     // MARK: - LLM 后处理
 
     /// 是否启用 LLM 后处理
     var llmPostProcessingEnabled: Bool {
-        get { defaults.bool(forKey: Keys.llmPostProcessingEnabled) }
-        set { defaults.set(newValue, forKey: Keys.llmPostProcessingEnabled) }
+        get { ConfigManager.shared.getBool(ConfigKeys.llmPostProcessingEnabled, default: false) }
+        set { ConfigManager.shared.set(ConfigKeys.llmPostProcessingEnabled, value: newValue) }
     }
 
     /// OpenAI API Key（或兼容 API 的密钥）
-    // C5: API Key 使用 Keychain 存储，不再明文存 UserDefaults
+    // C5: API Key 使用 Keychain 存储，不读写 config.json
     var llmApiKey: String {
         get { KeychainHelper.get(service: "com.urdao.voiceinput", account: "llmApiKey") ?? "" }
         set {
@@ -280,7 +389,7 @@ final class SettingsManager {
             } else {
                 KeychainHelper.set(newValue, service: "com.urdao.voiceinput", account: "llmApiKey")
             }
-            // 清除旧的 UserDefaults 明文存储（迁移）
+            // 清除旧的 UserDefaults 明文存储（兼容性清理）
             defaults.removeObject(forKey: Keys.llmApiKey)
         }
     }
@@ -288,25 +397,25 @@ final class SettingsManager {
     /// API Base URL，默认 https://api.openai.com/v1，支持自定义（兼容 OpenAI compatible API）
     var llmApiBaseURL: String {
         get {
-            let stored = defaults.string(forKey: Keys.llmApiBaseURL) ?? ""
+            let stored = ConfigManager.shared.getString(ConfigKeys.llmApiBaseURL, default: "")
             return stored.isEmpty ? "https://api.openai.com/v1" : stored
         }
-        set { defaults.set(newValue, forKey: Keys.llmApiBaseURL) }
+        set { ConfigManager.shared.set(ConfigKeys.llmApiBaseURL, value: newValue) }
     }
 
     /// LLM 模型名，默认 gpt-4o-mini
     var llmModel: String {
         get {
-            let stored = defaults.string(forKey: Keys.llmModel) ?? ""
+            let stored = ConfigManager.shared.getString(ConfigKeys.llmModel, default: "")
             return stored.isEmpty ? "gpt-4o-mini" : stored
         }
-        set { defaults.set(newValue, forKey: Keys.llmModel) }
+        set { ConfigManager.shared.set(ConfigKeys.llmModel, value: newValue) }
     }
 
     /// 当前激活的预设 ID
     var llmActivePreset: String {
-        get { defaults.string(forKey: Keys.llmActivePreset) ?? "" }
-        set { defaults.set(newValue, forKey: Keys.llmActivePreset) }
+        get { ConfigManager.shared.getString(ConfigKeys.llmActivePreset, default: "") }
+        set { ConfigManager.shared.set(ConfigKeys.llmActivePreset, value: newValue) }
     }
 
     // MARK: - Whisper 模型选择
@@ -356,74 +465,75 @@ final class SettingsManager {
 
     var whisperModel: WhisperModel {
         get {
-            let raw = defaults.string(forKey: Keys.whisperModel) ?? "small.en"
+            let raw = ConfigManager.shared.getString(ConfigKeys.whisperModel, default: "small.en")
             return WhisperModel(rawValue: raw) ?? .smallEn
         }
-        set { defaults.set(newValue.rawValue, forKey: Keys.whisperModel) }
+        set { ConfigManager.shared.set(ConfigKeys.whisperModel, value: newValue.rawValue) }
     }
 
     // MARK: - LLM 高级参数
 
     var llmMaxTokens: Int {
         get {
-            let v = defaults.integer(forKey: Keys.llmMaxTokens)
+            let v = ConfigManager.shared.getInt(ConfigKeys.llmMaxTokens, default: 0)
             return v > 0 ? v : 200
         }
-        set { defaults.set(newValue, forKey: Keys.llmMaxTokens) }
+        set { ConfigManager.shared.set(ConfigKeys.llmMaxTokens, value: newValue) }
     }
 
     var llmTemperature: Double {
         get {
-            let v = defaults.double(forKey: Keys.llmTemperature)
+            let v = ConfigManager.shared.getDouble(ConfigKeys.llmTemperature, default: 0)
             return v > 0 ? v : 0.1
         }
-        set { defaults.set(newValue, forKey: Keys.llmTemperature) }
+        set { ConfigManager.shared.set(ConfigKeys.llmTemperature, value: newValue) }
     }
 
     var llmTimeout: Double {
         get {
-            let v = defaults.double(forKey: Keys.llmTimeout)
+            let v = ConfigManager.shared.getDouble(ConfigKeys.llmTimeout, default: 0)
             return v > 0 ? v : 4.0
         }
-        set { defaults.set(newValue, forKey: Keys.llmTimeout) }
+        set { ConfigManager.shared.set(ConfigKeys.llmTimeout, value: newValue) }
     }
 
     /// LLM 最短文本长度（低于此长度跳过 LLM）
     var llmMinTextLength: Int {
         get {
-            let v = defaults.integer(forKey: Keys.llmMinTextLength)
+            let v = ConfigManager.shared.getInt(ConfigKeys.llmMinTextLength, default: 0)
             return v > 0 ? v : 5
         }
-        set { defaults.set(newValue, forKey: Keys.llmMinTextLength) }
+        set { ConfigManager.shared.set(ConfigKeys.llmMinTextLength, value: newValue) }
     }
 
     /// 短音频阈值（秒），低于此时长的音频走 Whisper
     var shortAudioThreshold: Double {
         get {
-            let v = defaults.double(forKey: Keys.shortAudioThreshold)
+            let v = ConfigManager.shared.getDouble(ConfigKeys.shortAudioThreshold, default: 0)
             return v > 0 ? v : 2.0
         }
-        set { defaults.set(newValue, forKey: Keys.shortAudioThreshold) }
+        set { ConfigManager.shared.set(ConfigKeys.shortAudioThreshold, value: newValue) }
     }
 
-    // MARK: - 预设配置存取
+    // MARK: - 预设配置存取（存到 config.json presets.{presetId}）
 
     /// 保存当前配置到指定预设
     func saveCurrentToPreset(_ presetId: String) {
-        let prefix = "llm.preset.\(presetId)"
-        // API Key 存 Keychain
+        let cfg = ConfigManager.shared
+        // API Key 存 Keychain（不变）
         if !llmApiKey.isEmpty {
-            KeychainHelper.set(llmApiKey, service: "com.urdao.voiceinput", account: "\(prefix).apiKey")
+            KeychainHelper.set(llmApiKey, service: "com.urdao.voiceinput", account: "llm.preset.\(presetId).apiKey")
         }
-        defaults.set(llmApiBaseURL, forKey: "\(prefix).baseURL")
-        defaults.set(llmModel, forKey: "\(prefix).model")
+        // BaseURL 和 Model 存 config.json
+        cfg.set("presets.\(presetId).baseURL", value: llmApiBaseURL)
+        cfg.set("presets.\(presetId).model", value: llmModel)
         llmActivePreset = presetId
         fputs("[Settings] 保存预设 \(presetId): model=\(llmModel), baseURL=\(llmApiBaseURL)\n", stderr)
     }
 
     /// 加载预设配置（如果之前保存过，恢复用户的自定义值）
     func loadPreset(_ presetId: String) {
-        let prefix = "llm.preset.\(presetId)"
+        let cfg = ConfigManager.shared
 
         // 先保存当前预设（如果有活动预设）
         let currentPreset = llmActivePreset
@@ -438,9 +548,9 @@ final class SettingsManager {
         }
 
         // 加载保存的配置，没保存过则用默认值
-        let savedKey = KeychainHelper.get(service: "com.urdao.voiceinput", account: "\(prefix).apiKey") ?? ""
-        let savedURL = defaults.string(forKey: "\(prefix).baseURL") ?? ""
-        let savedModel = defaults.string(forKey: "\(prefix).model") ?? ""
+        let savedKey = KeychainHelper.get(service: "com.urdao.voiceinput", account: "llm.preset.\(presetId).apiKey") ?? ""
+        let savedURL = cfg.getString("presets.\(presetId).baseURL", default: "")
+        let savedModel = cfg.getString("presets.\(presetId).model", default: "")
 
         llmApiBaseURL = savedURL.isEmpty ? preset.defaultBaseURL : savedURL
         llmModel = savedModel.isEmpty ? preset.defaultModel : savedModel

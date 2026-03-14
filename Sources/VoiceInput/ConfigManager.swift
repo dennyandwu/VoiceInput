@@ -144,7 +144,7 @@ class ConfigManager {
     private func hardcodedDefaults() -> [String: Any] {
         return [
             "asr": [
-                "languageMode": "auto",
+                "languageMode": "zh+en",
                 "shortAudioThreshold": 2.0,
                 "modelType": "int8"
             ],

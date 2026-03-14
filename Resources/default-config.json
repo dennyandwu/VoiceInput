@@ -4,7 +4,7 @@
 
     "asr": {
         "_comment": "语音识别引擎参数",
-        "languageMode": "auto",
+        "languageMode": "zh+en",
         "shortAudioThreshold": 2.0,
         "modelType": "int8"
     },

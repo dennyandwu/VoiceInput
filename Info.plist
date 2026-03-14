@@ -2,38 +2,38 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key>
-    <string>VoiceInput</string>
-    <key>CFBundleDisplayName</key>
-    <string>VoiceInput</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.urdao.voiceinput</string>
-    <key>CFBundleVersion</key>
-    <string>3.0.3</string>
-    <key>CFBundleShortVersionString</key>
-    <string>3.0.3</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleExecutable</key>
-    <string>VoiceInput</string>
-    <key>CFBundleIconFile</key>
-    <string>AppIcon</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
-    <key>LSUIElement</key>
-    <true/>
-    <key>NSMicrophoneUsageDescription</key>
-    <string>VoiceInput 需要麦克风权限来进行语音识别。所有音频数据仅在本地处理，不会上传到任何服务器。</string>
-    <key>NSHighResolutionCapable</key>
-    <true/>
-    <key>LSArchitecturePriority</key>
-    <array>
-        <string>arm64</string>
-    </array>
-    <key>NSAppTransportSecurity</key>
-    <dict>
-        <key>NSAllowsLocalNetworking</key>
-        <true/>
-    </dict>
+	<key>CFBundleDisplayName</key>
+	<string>VoiceInput</string>
+	<key>CFBundleExecutable</key>
+	<string>VoiceInput</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.urdao.voiceinput</string>
+	<key>CFBundleName</key>
+	<string>VoiceInput</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>3.0.4</string>
+	<key>CFBundleVersion</key>
+	<string>3.0.4</string>
+	<key>LSArchitecturePriority</key>
+	<array>
+		<string>arm64</string>
+	</array>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>VoiceInput 需要麦克风权限来进行语音识别。所有音频数据仅在本地处理，不会上传到任何服务器。</string>
 </dict>
 </plist>

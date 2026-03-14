@@ -10,7 +10,7 @@ cd "$SCRIPT_DIR"
 
 # ─── 配置 ───────────────────────────────────────────────────────────────────
 APP_NAME="VoiceInput"
-APP_VERSION="3.0.3"
+APP_VERSION="3.0.4"
 BUNDLE_ID="com.urdao.voiceinput"
 
 SHERPA_DIR="$SCRIPT_DIR/sherpa-onnx-v1.12.28-osx-universal2-shared"
