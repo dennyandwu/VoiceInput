@@ -2,17 +2,18 @@ import Foundation
 import Security
 
 /// 简单的 Keychain 存取封装
-/// 使用 Data Protection Keychain (kSecUseDataProtectionKeychain)
-/// 避免 ad-hoc 签名应用弹出 Keychain 授权弹窗
+/// 优先使用 Data Protection Keychain，ad-hoc 签名失败时自动降级到 legacy Keychain
 enum KeychainHelper {
 
+    /// 尝试写入 Data Protection Keychain，失败则降级到 legacy Keychain
     static func set(_ value: String, service: String, account: String) {
         guard let data = value.data(using: .utf8) else { return }
 
-        // 先删除旧值
+        // 先删除旧值（两个域都清理）
         delete(service: service, account: account)
 
-        let query: [String: Any] = [
+        // 尝试 Data Protection Keychain
+        let dpQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
@@ -21,15 +22,36 @@ enum KeychainHelper {
             kSecUseDataProtectionKeychain as String: true
         ]
 
-        let status = SecItemAdd(query as CFDictionary, nil)
-        if status != errSecSuccess {
-            fputs("[Keychain] 写入失败: \(status)\n", stderr)
+        let dpStatus = SecItemAdd(dpQuery as CFDictionary, nil)
+        if dpStatus == errSecSuccess {
+            fputs("[Keychain] 写入成功 (Data Protection): \(account)\n", stderr)
+            return
+        }
+
+        // Data Protection 失败（-34018 = errSecMissingEntitlement，ad-hoc 签名常见）
+        // 降级到 legacy Keychain
+        fputs("[Keychain] Data Protection 写入失败 (\(dpStatus))，降级到 legacy keychain\n", stderr)
+
+        let legacyQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        ]
+
+        let legacyStatus = SecItemAdd(legacyQuery as CFDictionary, nil)
+        if legacyStatus == errSecSuccess {
+            fputs("[Keychain] 写入成功 (legacy): \(account)\n", stderr)
+        } else {
+            fputs("[Keychain] legacy 写入也失败: \(legacyStatus)\n", stderr)
         }
     }
 
+    /// 优先从 Data Protection Keychain 读取，失败则从 legacy Keychain 读取
     static func get(service: String, account: String) -> String? {
-        // 优先从 Data Protection Keychain 读取
-        let query: [String: Any] = [
+        // 1. 尝试 Data Protection Keychain
+        let dpQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
@@ -39,14 +61,14 @@ enum KeychainHelper {
         ]
 
         var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        let dpStatus = SecItemCopyMatching(dpQuery as CFDictionary, &result)
 
-        if status == errSecSuccess, let data = result as? Data,
+        if dpStatus == errSecSuccess, let data = result as? Data,
            let value = String(data: data, encoding: .utf8) {
             return value
         }
 
-        // Fallback: 从 legacy Keychain 读取（v3.0.2 及之前存的 key）
+        // 2. Fallback: legacy Keychain
         let legacyQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -60,27 +82,24 @@ enum KeychainHelper {
 
         if legacyStatus == errSecSuccess, let data = legacyResult as? Data,
            let value = String(data: data, encoding: .utf8) {
-            // 自动迁移到 Data Protection Keychain
-            set(value, service: service, account: account)
-            // 删除 legacy 条目
-            SecItemDelete(legacyQuery as CFDictionary)
-            fputs("[Keychain] 已从 legacy keychain 迁移: \(account)\n", stderr)
             return value
         }
 
         return nil
     }
 
+    /// 删除两个域的条目
     static func delete(service: String, account: String) {
-        let query: [String: Any] = [
+        // Data Protection Keychain
+        let dpQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
             kSecUseDataProtectionKeychain as String: true
         ]
-        SecItemDelete(query as CFDictionary)
+        SecItemDelete(dpQuery as CFDictionary)
 
-        // 也清理旧的 legacy keychain 条目（迁移用）
+        // Legacy Keychain
         let legacyQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
