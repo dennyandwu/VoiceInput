@@ -3,6 +3,7 @@
 // Copyright (c) 2026 urDAO Investment
 
 import Foundation
+import os
 
 /// LLM 后处理器：调用 OpenAI compatible API 优化 ASR 文本
 /// - 去填充词（呃、嗯、那个、就是说）
@@ -10,6 +11,8 @@ import Foundation
 /// - 规范标点符号
 /// 可通过 SettingsManager 开关，支持自定义 API Base URL
 final class LLMPostProcessor {
+
+    private static let logger = Logger(subsystem: "com.urdao.voiceinput", category: "LLMPostProcessor")
 
     // MARK: - Singleton
 
@@ -74,7 +77,7 @@ final class LLMPostProcessor {
     func process(_ text: String) -> String {
         guard isEnabled else { return text }
         guard text.count >= minTextLength else {
-            fputs("[LLM] 文本过短（\(text.count) 字符），跳过处理\n", stderr)
+            Self.logger.debug("文本过短（\(text.count) 字符），跳过处理")
             return text
         }
 
@@ -91,7 +94,7 @@ final class LLMPostProcessor {
 
         if waitResult == .timedOut {
             let elapsed = Date().timeIntervalSince(startTime)
-            fputs("[LLM] ⚠️ 超时（\(String(format: "%.2f", elapsed))s），返回原文\n", stderr)
+            Self.logger.warning("⚠️ 超时（\(String(format: "%.2f", elapsed))s），返回原文")
             return text
         }
 
@@ -100,13 +103,13 @@ final class LLMPostProcessor {
             // 安全检查：如果 LLM 输出长度与原文差异超过 50%，可能是 LLM 在"回复"而非纠错
             let lenRatio = Double(result.count) / max(Double(text.count), 1.0)
             if lenRatio < 0.3 || lenRatio > 2.0 {
-                fputs("[LLM] ⚠️ 安全拦截：输出长度异常（原文\(text.count)字 → \(result.count)字，比率\(String(format: "%.1f", lenRatio))），放弃 LLM 结果\n", stderr)
+                Self.logger.warning("⚠️ 安全拦截：输出长度异常（原文\(text.count)字 → \(result.count)字，比率\(String(format: "%.1f", lenRatio))），放弃 LLM 结果")
                 return text
             }
             // H8: 日志只记录长度和是否修改，不记录完整文本（隐私）
-            fputs("[LLM] 修正: \(text.count)字 → \(result.count)字\n", stderr)
+            Self.logger.info("修正: \(text.count)字 → \(result.count)字")
         } else {
-            fputs("[LLM] 无变化 (\(text.count)字)\n", stderr)
+            Self.logger.info("无变化 (\(text.count)字)")
         }
 
         return result
@@ -120,7 +123,7 @@ final class LLMPostProcessor {
             return
         }
         guard text.count >= minTextLength else {
-            fputs("[LLM] 文本过短（\(text.count) 字符），跳过处理\n", stderr)
+            Self.logger.debug("文本过短（\(text.count) 字符），跳过处理")
             completion(text)
             return
         }
@@ -139,7 +142,7 @@ final class LLMPostProcessor {
         let endpoint = "\(baseURL)/chat/completions"
 
         guard let url = URL(string: endpoint) else {
-            fputs("[LLM] ERROR: 无效的 API URL: \(endpoint)\n", stderr)
+            Self.logger.error("无效的 API URL: \(endpoint)")
             completion(text)
             return
         }
@@ -156,7 +159,7 @@ final class LLMPostProcessor {
         ]
 
         guard let bodyData = try? JSONSerialization.data(withJSONObject: requestBody) else {
-            fputs("[LLM] ERROR: 无法序列化请求体\n", stderr)
+            Self.logger.error("无法序列化请求体")
             completion(text)
             return
         }
@@ -172,20 +175,20 @@ final class LLMPostProcessor {
             let elapsed = Date().timeIntervalSince(startTime)
 
             if let error = error {
-                fputs("[LLM] ERROR: 网络错误（\(String(format: "%.2f", elapsed))s）: \(error.localizedDescription)\n", stderr)
+                Self.logger.error("网络错误（\(String(format: "%.2f", elapsed))s）: \(error.localizedDescription)")
                 completion(text)
                 return
             }
 
             guard let httpResponse = response as? HTTPURLResponse else {
-                fputs("[LLM] ERROR: 无效响应\n", stderr)
+                Self.logger.error("无效响应")
                 completion(text)
                 return
             }
 
             guard httpResponse.statusCode == 200 else {
                 let body = data.flatMap { String(data: $0, encoding: .utf8) } ?? "(no body)"
-                fputs("[LLM] ERROR: HTTP \(httpResponse.statusCode)（\(String(format: "%.2f", elapsed))s）: \(body.prefix(200))\n", stderr)
+                Self.logger.error("HTTP \(httpResponse.statusCode)（\(String(format: "%.2f", elapsed))s）: \(body.prefix(200))")
                 completion(text)
                 return
             }
@@ -196,7 +199,7 @@ final class LLMPostProcessor {
                   let first = choices.first,
                   let message = first["message"] as? [String: Any],
                   let content = message["content"] as? String else {
-                fputs("[LLM] ERROR: 无法解析响应 JSON\n", stderr)
+                Self.logger.error("无法解析响应 JSON")
                 completion(text)
                 return
             }
@@ -206,9 +209,9 @@ final class LLMPostProcessor {
                 let promptTokens     = usage["prompt_tokens"] as? Int ?? 0
                 let completionTokens = usage["completion_tokens"] as? Int ?? 0
                 let totalTokens      = usage["total_tokens"] as? Int ?? 0
-                fputs("[LLM] ✅ 处理完成（\(String(format: "%.2f", elapsed))s）tokens: prompt=\(promptTokens) completion=\(completionTokens) total=\(totalTokens)\n", stderr)
+                Self.logger.info("✅ 处理完成（\(String(format: "%.2f", elapsed))s）tokens: prompt=\(promptTokens) completion=\(completionTokens) total=\(totalTokens)")
             } else {
-                fputs("[LLM] ✅ 处理完成（\(String(format: "%.2f", elapsed))s）\n", stderr)
+                Self.logger.info("✅ 处理完成（\(String(format: "%.2f", elapsed))s）")
             }
 
             let processed = content.trimmingCharacters(in: .whitespacesAndNewlines)

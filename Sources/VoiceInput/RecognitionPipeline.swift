@@ -5,6 +5,7 @@
 
 import Foundation
 import AVFoundation
+import os
 
 // MARK: - Pipeline 结果
 
@@ -37,6 +38,8 @@ struct PipelineResult {
 /// 1. Push-to-Talk：手动 startListening / stopListening
 /// 2. Simulate：从 WAV 文件模拟麦克风输入
 class RecognitionPipeline {
+
+    private static let logger = Logger(subsystem: "com.urdao.voiceinput", category: "Pipeline")
 
     // MARK: - 组件
 
@@ -73,11 +76,12 @@ class RecognitionPipeline {
 
         // 初始化 VAD
         if useVAD {
-            self.vad = VoiceActivityDetector(sileroModelPath: sileroModelPath)
-            fputs("[Pipeline] VAD 后端: \(self.vad!.backendName)\n", stderr)
+            let detector = VoiceActivityDetector(sileroModelPath: sileroModelPath)
+            self.vad = detector
+            Self.logger.info("VAD 后端: \(detector.backendName)")
         } else {
             self.vad = nil
-            fputs("[Pipeline] VAD 已禁用\n", stderr)
+            Self.logger.info("VAD 已禁用")
         }
 
         // 加载识别模型
@@ -88,7 +92,7 @@ class RecognitionPipeline {
         )
 
         if !loaded {
-            fputs("[Pipeline] ERROR: 模型加载失败！\n", stderr)
+            Self.logger.error("模型加载失败！")
         }
     }
 
@@ -101,11 +105,11 @@ class RecognitionPipeline {
     @discardableResult
     func startListening() -> Bool {
         guard modelLoaded else {
-            fputs("[Pipeline] ERROR: 模型未加载\n", stderr)
+            Self.logger.error("模型未加载")
             return false
         }
         guard !isListening else {
-            fputs("[Pipeline] 已在监听中\n", stderr)
+            Self.logger.info("已在监听中")
             return false
         }
 
@@ -126,7 +130,7 @@ class RecognitionPipeline {
                     }
                     self.vadLock.unlock()
                     for seg in segments {
-                        fputs("[Pipeline] VAD 检测到语音段: \(String(format: "%.2f", seg.duration))s\n", stderr)
+                        Self.logger.info("VAD 检测到语音段: \(String(format: "%.2f", seg.duration))s")
                     }
                 }
             }
@@ -136,7 +140,7 @@ class RecognitionPipeline {
 
         isListening = recorder.startRecording()
         if isListening {
-            fputs("[Pipeline] 开始监听 🎙️\n", stderr)
+            Self.logger.info("开始监听 🎙️")
         }
         return isListening
     }
@@ -145,22 +149,22 @@ class RecognitionPipeline {
     /// - Returns: 识别结果
     func stopListening() -> PipelineResult {
         guard isListening else {
-            fputs("[Pipeline] 未在监听中\n", stderr)
+            Self.logger.info("未在监听中")
             return PipelineResult(text: "", lang: "", emotion: "", event: "", audioSamples: 0, duration: 0, processingTime: 0)
         }
 
         let fullAudio = recorder.stopRecording()
         isListening = false
 
-        fputs("[Pipeline] 录音结束，总样本: \(fullAudio.count) (\(String(format: "%.2f", Double(fullAudio.count) / 16000.0))s)\n", stderr)
+        Self.logger.info("录音结束，总样本: \(fullAudio.count) (\(String(format: "%.2f", Double(fullAudio.count) / 16000.0))s)")
 
         // 检查音频是否有效（非全零）
         if !fullAudio.isEmpty {
             let maxAmp = fullAudio.map { abs($0) }.max() ?? 0
             let rms = sqrt(fullAudio.map { $0 * $0 }.reduce(0, +) / Float(fullAudio.count))
-            fputs("[Pipeline] 音频统计: maxAmp=\(String(format: "%.4f", maxAmp)), RMS=\(String(format: "%.4f", rms))\n", stderr)
+            Self.logger.info("音频统计: maxAmp=\(String(format: "%.4f", maxAmp)), RMS=\(String(format: "%.4f", rms))")
             if maxAmp < 0.001 {
-                fputs("[Pipeline] ⚠️ 音频几乎静音！检查麦克风是否正常\n", stderr)
+                Self.logger.warning("⚠️ 音频几乎静音！检查麦克风是否正常")
             }
         }
 
@@ -181,12 +185,12 @@ class RecognitionPipeline {
             vadLock.unlock()
 
             if segments.isEmpty {
-                fputs("[Pipeline] VAD 未检测到语音段，使用完整录音进行识别\n", stderr)
+                Self.logger.info("VAD 未检测到语音段，使用完整录音进行识别")
                 audioToRecognize = fullAudio
             } else {
                 // 拼接所有语音段
                 audioToRecognize = segments.flatMap { $0 }
-                fputs("[Pipeline] VAD 合并 \(segments.count) 段语音，总计 \(audioToRecognize.count) 样本\n", stderr)
+                Self.logger.info("VAD 合并 \(segments.count) 段语音，总计 \(audioToRecognize.count) 样本")
             }
         } else {
             audioToRecognize = fullAudio
@@ -203,11 +207,11 @@ class RecognitionPipeline {
     /// - Returns: 识别结果
     func recordAndRecognize(duration: Double) -> PipelineResult {
         guard modelLoaded else {
-            fputs("[Pipeline] ERROR: 模型未加载\n", stderr)
+            Self.logger.error("模型未加载")
             return PipelineResult(text: "", lang: "", emotion: "", event: "", audioSamples: 0, duration: 0, processingTime: 0)
         }
 
-        fputs("[Pipeline] 开始录音 \(duration)s...\n", stderr)
+        Self.logger.info("开始录音 \(duration)s...")
 
         if !startListening() {
             return PipelineResult(text: "", lang: "", emotion: "", event: "", audioSamples: 0, duration: 0, processingTime: 0)
@@ -218,7 +222,7 @@ class RecognitionPipeline {
         Thread.sleep(forTimeInterval: duration)
 
         let result = stopListening()
-        fputs("[Pipeline] 录音完成，结果: \(result.description)\n", stderr)
+        Self.logger.info("录音完成，结果: \(result.description)")
         return result
     }
 
@@ -229,15 +233,15 @@ class RecognitionPipeline {
     /// - Returns: 识别结果
     func simulate(fileURL: URL) -> PipelineResult {
         guard modelLoaded else {
-            fputs("[Pipeline] ERROR: 模型未加载\n", stderr)
+            Self.logger.error("模型未加载")
             return PipelineResult(text: "", lang: "", emotion: "", event: "", audioSamples: 0, duration: 0, processingTime: 0)
         }
 
-        fputs("[Pipeline] 模拟模式: \(fileURL.lastPathComponent)\n", stderr)
+        Self.logger.info("模拟模式: \(fileURL.lastPathComponent)")
 
         let source = SimulatedAudioSource()
         guard source.load(fileURL: fileURL) else {
-            fputs("[Pipeline] ERROR: 无法加载模拟音频\n", stderr)
+            Self.logger.error("无法加载模拟音频")
             return PipelineResult(text: "", lang: "", emotion: "", event: "", audioSamples: 0, duration: 0, processingTime: 0)
         }
 
@@ -250,25 +254,25 @@ class RecognitionPipeline {
                 let segments = vad.acceptSamples(chunk)
                 for seg in segments {
                     allSegments.append(seg.samples)
-                    fputs("[Pipeline] VAD 检测到语音段: \(String(format: "%.2f", seg.duration))s\n", stderr)
+                    Self.logger.info("VAD 检测到语音段: \(String(format: "%.2f", seg.duration))s")
                 }
             }
             // flush 最后一段
             let finalSegments = vad.flush()
             for seg in finalSegments {
                 allSegments.append(seg.samples)
-                fputs("[Pipeline] VAD flush 语音段: \(String(format: "%.2f", seg.duration))s\n", stderr)
+                Self.logger.info("VAD flush 语音段: \(String(format: "%.2f", seg.duration))s")
             }
         }
 
         // 决定识别的音频
         let audioToRecognize: [Float]
         if allSegments.isEmpty {
-            fputs("[Pipeline] VAD 无输出，使用全量音频\n", stderr)
+            Self.logger.info("VAD 无输出，使用全量音频")
             audioToRecognize = source.samples
         } else {
             audioToRecognize = allSegments.flatMap { $0 }
-            fputs("[Pipeline] 合并 \(allSegments.count) 个语音段，共 \(audioToRecognize.count) 样本\n", stderr)
+            Self.logger.info("合并 \(allSegments.count) 个语音段，共 \(audioToRecognize.count) 样本")
         }
 
         return recognize(audioData: audioToRecognize)
@@ -297,40 +301,77 @@ class RecognitionPipeline {
         )
     }
 
-    // MARK: - 内部：识别音频数据
+    // MARK: - 内部：识别音频数据（流程编排）
 
     private func recognize(audioData: [Float]) -> PipelineResult {
         guard !audioData.isEmpty else {
-            fputs("[Pipeline] 无有效音频数据\n", stderr)
+            Self.logger.info("无有效音频数据")
             return PipelineResult(text: "", lang: "", emotion: "", event: "", audioSamples: 0, duration: 0, processingTime: 0)
         }
 
         let duration = Double(audioData.count) / 16000.0
         let t0 = Date()
 
-        // MARK: 短音频快速路径 — 直接走 Whisper
-        // SenseVoice 对短音频语言检测不稳定（"SenseVoice" → "アイスボイス"）
-        let shortThreshold = SettingsManager.shared.shortAudioThreshold
-        if duration < shortThreshold && engine.hasWhisper {
-            fputs("[Pipeline] 短音频（\(String(format: "%.1f", duration))s < \(String(format: "%.1f", shortThreshold))s）→ Whisper 直接处理\n", stderr)
-            let whisperResult = engine.recognizeWithWhisper(audioData: audioData, sampleRate: 16000)
-            let wText = whisperResult.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            let elapsed = Date().timeIntervalSince(t0)
-            if !wText.isEmpty {
-                fputs("[Pipeline] Whisper 短音频结果: \"\(wText)\" (\(String(format: "%.3f", elapsed))s)\n", stderr)
-                return PipelineResult(
-                    text: wText,
-                    lang: whisperResult.lang.isEmpty ? "<|en|>" : whisperResult.lang,
-                    emotion: "", event: "",
-                    audioSamples: audioData.count,
-                    duration: duration,
-                    processingTime: elapsed
-                )
-            }
-            fputs("[Pipeline] Whisper 短音频返回空，回退 SenseVoice\n", stderr)
+        // 1. 短音频 Whisper 快速路径
+        if let result = recognizeShortAudio(audioData: audioData, duration: duration, startTime: t0) {
+            return result
         }
 
-        // 第一遍：SenseVoice（快速语言检测 + 中文识别）
+        // 2. SenseVoice 第一遍识别
+        let (senseVoiceResult, svText, svChinese, svASCII, svDom, detectedLang) =
+            recognizeWithSenseVoice(audioData: audioData)
+
+        // 3. 日语/韩语误检拦截
+        if let result = handleLanguageMisdetection(
+            audioData: audioData, svText: svText,
+            detectedLang: detectedLang, duration: duration, startTime: t0
+        ) {
+            return result
+        }
+
+        // 4. 智能路由策略
+        return routeToEngine(
+            audioData: audioData,
+            senseVoiceResult: senseVoiceResult,
+            svText: svText, svChinese: svChinese, svASCII: svASCII, svDom: svDom,
+            duration: duration, startTime: t0
+        )
+    }
+
+    // MARK: 1. 短音频 Whisper 快速路径
+
+    /// 短音频直接走 Whisper，返回 nil 表示不满足条件，继续后续流程
+    private func recognizeShortAudio(audioData: [Float], duration: Double, startTime: Date) -> PipelineResult? {
+        let shortThreshold = SettingsManager.shared.shortAudioThreshold
+        guard duration < shortThreshold && engine.hasWhisper else { return nil }
+
+        Self.logger.info("短音频（\(String(format: "%.1f", duration))s < \(String(format: "%.1f", shortThreshold))s）→ Whisper 直接处理")
+        let whisperResult = engine.recognizeWithWhisper(audioData: audioData, sampleRate: 16000)
+        let wText = whisperResult.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let elapsed = Date().timeIntervalSince(startTime)
+
+        if !wText.isEmpty {
+            Self.logger.info("Whisper 短音频结果: \"\(wText, privacy: .private)\" (\(String(format: "%.3f", elapsed))s)")
+            return PipelineResult(
+                text: wText,
+                lang: whisperResult.lang.isEmpty ? "<|en|>" : whisperResult.lang,
+                emotion: "", event: "",
+                audioSamples: audioData.count,
+                duration: duration,
+                processingTime: elapsed
+            )
+        }
+
+        Self.logger.info("Whisper 短音频返回空，回退 SenseVoice")
+        return nil
+    }
+
+    // MARK: 2. SenseVoice 第一遍识别
+
+    /// 运行 SenseVoice 并返回识别结果及各项语言分析数据
+    private func recognizeWithSenseVoice(audioData: [Float])
+        -> (result: RecognitionResult, svText: String, svChinese: Double, svASCII: Double, svDom: String, detectedLang: String)
+    {
         let senseVoiceResult = engine.recognize(audioData: audioData, sampleRate: 16000)
         let detectedLang = TextPostProcessor.extractLanguage(senseVoiceResult.text).isEmpty
             ? senseVoiceResult.lang
@@ -341,92 +382,72 @@ class RecognitionPipeline {
         let svASCII = asciiRatio(svText)
         let svDom = dominantLanguage(svText)
 
-        fputs("[Pipeline] SenseVoice: lang=\(detectedLang), dom=\(svDom), zh=\(String(format: "%.1f%%", svChinese * 100)), ascii=\(String(format: "%.1f%%", svASCII * 100)), text=\"\(svText)\"\n", stderr)
+        Self.logger.info("SenseVoice: lang=\(detectedLang), dom=\(svDom), zh=\(String(format: "%.1f%%", svChinese * 100)), ascii=\(String(format: "%.1f%%", svASCII * 100)), text=\"\(svText, privacy: .private)\"")
 
-        // MARK: 日语/韩语误检拦截 → Whisper fallback
-        // SenseVoice 对短音频或英语容易误判为日语假名，fallback 到 Whisper
-        if (detectedLang == "<|ja|>" || detectedLang == "<|ko|>") && svChinese == 0 && svASCII == 0 {
-            let hasUsefulContent = svText.unicodeScalars.contains { scalar in
-                (0x4E00...0x9FFF).contains(scalar.value) ||   // CJK Unified
-                (0x3400...0x4DBF).contains(scalar.value) ||   // CJK Extension A
-                (0x0041...0x007A).contains(scalar.value)      // ASCII letters
-            }
-            if !hasUsefulContent {
-                if engine.hasWhisper {
-                    fputs("[Pipeline] ⚠️ 语言误检(\(detectedLang))，全假名无汉字 → Whisper fallback\n", stderr)
-                    let whisperResult = engine.recognizeWithWhisper(audioData: audioData, sampleRate: 16000)
-                    let wText = whisperResult.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !wText.isEmpty {
-                        fputs("[Pipeline] Whisper fallback 结果: \"\(wText)\"\n", stderr)
-                        return PipelineResult(
-                            text: wText,
-                            lang: whisperResult.lang.isEmpty ? "<|en|>" : whisperResult.lang,
-                            emotion: "", event: "",
-                            audioSamples: audioData.count,
-                            duration: duration,
-                            processingTime: Date().timeIntervalSince(t0)
-                        )
-                    }
-                    fputs("[Pipeline] Whisper fallback 也返回空，丢弃\n", stderr)
-                } else {
-                    fputs("[Pipeline] ⚠️ 语言误检(\(detectedLang))，无 Whisper 可用，丢弃\n", stderr)
-                }
-                return PipelineResult(text: "", lang: "zh", emotion: "", event: "", audioSamples: 0, duration: duration, processingTime: 0)
-            }
+        return (senseVoiceResult, svText, svChinese, svASCII, svDom, detectedLang)
+    }
+
+    // MARK: 3. 日语/韩语误检拦截
+
+    /// 拦截 SenseVoice 对短音频的日语/韩语误判，返回 nil 表示无误检，继续路由
+    private func handleLanguageMisdetection(
+        audioData: [Float], svText: String, detectedLang: String,
+        duration: Double, startTime: Date
+    ) -> PipelineResult? {
+        guard (detectedLang == "<|ja|>" || detectedLang == "<|ko|>") && chineseRatio(svText) == 0 && asciiRatio(svText) == 0 else {
+            return nil
         }
 
+        let hasUsefulContent = svText.unicodeScalars.contains { scalar in
+            (0x4E00...0x9FFF).contains(scalar.value) ||   // CJK Unified
+            (0x3400...0x4DBF).contains(scalar.value) ||   // CJK Extension A
+            (0x0041...0x007A).contains(scalar.value)      // ASCII letters
+        }
+        guard !hasUsefulContent else { return nil }
+
+        if engine.hasWhisper {
+            Self.logger.warning("⚠️ 语言误检(\(detectedLang))，全假名无汉字 → Whisper fallback")
+            let whisperResult = engine.recognizeWithWhisper(audioData: audioData, sampleRate: 16000)
+            let wText = whisperResult.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !wText.isEmpty {
+                Self.logger.info("Whisper fallback 结果: \"\(wText, privacy: .private)\"")
+                return PipelineResult(
+                    text: wText,
+                    lang: whisperResult.lang.isEmpty ? "<|en|>" : whisperResult.lang,
+                    emotion: "", event: "",
+                    audioSamples: audioData.count,
+                    duration: duration,
+                    processingTime: Date().timeIntervalSince(startTime)
+                )
+            }
+            Self.logger.info("Whisper fallback 也返回空，丢弃")
+        } else {
+            Self.logger.warning("⚠️ 语言误检(\(detectedLang))，无 Whisper 可用，丢弃")
+        }
+        return PipelineResult(text: "", lang: "zh", emotion: "", event: "", audioSamples: 0, duration: duration, processingTime: 0)
+    }
+
+    // MARK: 4. 智能路由策略
+
+    /// 根据语言分析结果路由到最佳识别引擎，返回最终 PipelineResult
+    private func routeToEngine(
+        audioData: [Float],
+        senseVoiceResult: RecognitionResult,
+        svText: String, svChinese: Double, svASCII: Double, svDom: String,
+        duration: Double, startTime: Date
+    ) -> PipelineResult {
         var finalResult = senseVoiceResult
 
-        // MARK: 智能路由策略
         if svDom == "zh" {
-            // a. 纯中文（>80% 中文字符）→ 直接用 SenseVoice
-            fputs("[Pipeline] 路由: 纯中文 → SenseVoice\n", stderr)
-
+            Self.logger.info("路由: 纯中文 → SenseVoice")
         } else if svDom == "en" {
-            // b. 纯英文（>80% ASCII）→ 用 Whisper（如已加载）
-            if engine.hasWhisper {
-                fputs("[Pipeline] 路由: 纯英文 → Whisper\n", stderr)
-                let whisperResult = engine.recognizeWithWhisper(audioData: audioData, sampleRate: 16000)
-                if !whisperResult.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    fputs("[Pipeline] Whisper 结果: \"\(whisperResult.text)\"\n", stderr)
-                    finalResult = whisperResult
-                } else {
-                    fputs("[Pipeline] Whisper 返回空，回退 SenseVoice\n", stderr)
-                }
-            } else {
-                fputs("[Pipeline] 路由: 纯英文但 Whisper 未加载 → SenseVoice\n", stderr)
-            }
-
+            finalResult = routeEnglish(audioData: audioData, fallback: senseVoiceResult)
         } else {
-            // c. 中英混合（20%-80%）
-            if engine.hasWhisper && svASCII >= ConfigManager.shared.getDouble("routing.asciiMinForWhisper", default: 0.25) {
-                // 英文占比 ≥25% 才值得调用 Whisper
-                fputs("[Pipeline] 路由: 中英混合（ascii=\(String(format: "%.0f%%", svASCII * 100))）→ Whisper 优先，校验中文保留\n", stderr)
-                let whisperResult = engine.recognizeWithWhisper(audioData: audioData, sampleRate: 16000)
-                let wText = TextPostProcessor.clean(whisperResult.text)
-                let wChinese = chineseRatio(wText)
-
-                fputs("[Pipeline] Whisper: zh=\(String(format: "%.1f%%", wChinese * 100)), text=\"\(wText)\"\n", stderr)
-
-                // Whisper 结果中文比例 >= SenseVoice 的 50%：Whisper 保留了足够多的中文 → 用 Whisper
-                let threshold = svChinese * ConfigManager.shared.getDouble("routing.mixedChineseRetention", default: 0.5)
-                if !wText.isEmpty && wChinese >= threshold {
-                    fputs("[Pipeline] Whisper 中文保留率 OK（\(String(format: "%.1f%%", wChinese * 100)) >= \(String(format: "%.1f%%", threshold * 100))），采用 Whisper\n", stderr)
-                    finalResult = whisperResult
-                } else {
-                    // Whisper 丢失了太多中文 → 保留 SenseVoice
-                    fputs("[Pipeline] Whisper 中文保留率不足，回退 SenseVoice（保护中文内容）\n", stderr)
-                }
-            } else if !engine.hasWhisper {
-                fputs("[Pipeline] 路由: 中英混合但 Whisper 未加载 → SenseVoice\n", stderr)
-            } else {
-                fputs("[Pipeline] 路由: 中英混合但英文占比低（ascii=\(String(format: "%.0f%%", svASCII * 100)) < 25%）→ SenseVoice\n", stderr)
-            }
+            finalResult = routeMixed(audioData: audioData, svChinese: svChinese, svASCII: svASCII, fallback: senseVoiceResult)
         }
 
-        let elapsed = Date().timeIntervalSince(t0)
-
-        fputs("[Pipeline] 识别完成: \"\(finalResult.text)\" (lang=\(finalResult.lang), RTF=\(String(format: "%.3f", elapsed/max(duration, 0.001))))\n", stderr)
+        let elapsed = Date().timeIntervalSince(startTime)
+        Self.logger.info("识别完成: \"\(finalResult.text, privacy: .private)\" (lang=\(finalResult.lang), RTF=\(String(format: "%.3f", elapsed/max(duration, 0.001))))")
 
         return PipelineResult(
             text: finalResult.text,
@@ -437,6 +458,49 @@ class RecognitionPipeline {
             duration: duration,
             processingTime: elapsed
         )
+    }
+
+    /// 纯英文路由：优先 Whisper，失败回退 SenseVoice
+    private func routeEnglish(audioData: [Float], fallback: RecognitionResult) -> RecognitionResult {
+        guard engine.hasWhisper else {
+            Self.logger.info("路由: 纯英文但 Whisper 未加载 → SenseVoice")
+            return fallback
+        }
+        Self.logger.info("路由: 纯英文 → Whisper")
+        let whisperResult = engine.recognizeWithWhisper(audioData: audioData, sampleRate: 16000)
+        if !whisperResult.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            Self.logger.info("Whisper 结果: \"\(whisperResult.text, privacy: .private)\"")
+            return whisperResult
+        }
+        Self.logger.info("Whisper 返回空，回退 SenseVoice")
+        return fallback
+    }
+
+    /// 中英混合路由：按英文占比和中文保留率决策
+    private func routeMixed(audioData: [Float], svChinese: Double, svASCII: Double, fallback: RecognitionResult) -> RecognitionResult {
+        let asciiMin = ConfigManager.shared.getDouble("routing.asciiMinForWhisper", default: 0.25)
+        guard engine.hasWhisper && svASCII >= asciiMin else {
+            if !engine.hasWhisper {
+                Self.logger.info("路由: 中英混合但 Whisper 未加载 → SenseVoice")
+            } else {
+                Self.logger.info("路由: 中英混合但英文占比低（ascii=\(String(format: "%.0f%%", svASCII * 100)) < 25%）→ SenseVoice")
+            }
+            return fallback
+        }
+
+        Self.logger.info("路由: 中英混合（ascii=\(String(format: "%.0f%%", svASCII * 100))）→ Whisper 优先，校验中文保留")
+        let whisperResult = engine.recognizeWithWhisper(audioData: audioData, sampleRate: 16000)
+        let wText = TextPostProcessor.clean(whisperResult.text)
+        let wChinese = chineseRatio(wText)
+        Self.logger.info("Whisper: zh=\(String(format: "%.1f%%", wChinese * 100)), text=\"\(wText, privacy: .private)\"")
+
+        let threshold = svChinese * ConfigManager.shared.getDouble("routing.mixedChineseRetention", default: 0.5)
+        if !wText.isEmpty && wChinese >= threshold {
+            Self.logger.info("Whisper 中文保留率 OK（\(String(format: "%.1f%%", wChinese * 100)) >= \(String(format: "%.1f%%", threshold * 100))），采用 Whisper")
+            return whisperResult
+        }
+        Self.logger.info("Whisper 中文保留率不足，回退 SenseVoice（保护中文内容）")
+        return fallback
     }
 
     // MARK: - 语言分析辅助函数

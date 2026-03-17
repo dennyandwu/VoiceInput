@@ -4,6 +4,7 @@
 // Copyright (c) 2026 urDAO Investment
 
 import Foundation
+import os
 
 // MARK: - VAD 协议
 
@@ -33,6 +34,8 @@ protocol VoiceActivityDetectorProtocol {
 /// SileroVAD 封装 sherpa-onnx 的 silero-vad 实现
 class SileroVAD: VoiceActivityDetectorProtocol {
 
+    private static let logger = Logger(subsystem: "com.urdao.voiceinput", category: "SileroVAD")
+
     private let vad: SherpaOnnxVoiceActivityDetectorWrapper
     private var _isSpeaking: Bool = false
 
@@ -55,7 +58,7 @@ class SileroVAD: VoiceActivityDetectorProtocol {
         bufferSizeInSeconds: Float = 30.0
     ) {
         guard FileManager.default.fileExists(atPath: modelPath) else {
-            fputs("[SileroVAD] ERROR: 模型文件不存在: \(modelPath)\n", stderr)
+            Self.logger.error("模型文件不存在: \(modelPath)")
             return nil
         }
 
@@ -81,8 +84,8 @@ class SileroVAD: VoiceActivityDetectorProtocol {
             buffer_size_in_seconds: bufferSizeInSeconds
         )
 
-        fputs("[SileroVAD] 初始化成功，模型: \((modelPath as NSString).lastPathComponent)\n", stderr)
-        fputs("[SileroVAD] 阈值=\(threshold), 最短静音=\(minSilenceDuration)s, 最短语音=\(minSpeechDuration)s\n", stderr)
+        Self.logger.info("初始化成功，模型: \((modelPath as NSString).lastPathComponent)")
+        Self.logger.info("阈值=\(threshold), 最短静音=\(minSilenceDuration)s, 最短语音=\(minSpeechDuration)s")
     }
 
     var isSpeaking: Bool { _isSpeaking }
@@ -131,6 +134,8 @@ class SileroVAD: VoiceActivityDetectorProtocol {
 /// 用于无 silero-vad 模型时的 fallback
 class EnergyVAD: VoiceActivityDetectorProtocol {
 
+    private static let logger = Logger(subsystem: "com.urdao.voiceinput", category: "EnergyVAD")
+
     private let threshold: Float          // RMS 能量阈值
     private let sampleRate: Int           // 采样率
     private let frameSize: Int            // 每帧样本数
@@ -174,7 +179,7 @@ class EnergyVAD: VoiceActivityDetectorProtocol {
         self.silenceDuration = silenceDuration
         self.minSpeechDuration = minSpeechDuration
 
-        fputs("[EnergyVAD] 初始化，阈值=\(threshold), 静音超时=\(silenceDuration)s\n", stderr)
+        Self.logger.info("初始化，阈值=\(threshold), 静音超时=\(silenceDuration)s")
     }
 
     func acceptSamples(_ samples: [Float]) -> [SpeechSegment] {
@@ -195,7 +200,7 @@ class EnergyVAD: VoiceActivityDetectorProtocol {
                     silentFrames = 0
                     speechStart = totalSamples
                     accumulated = []
-                    fputs("[EnergyVAD] 语音开始 (RMS=\(String(format: "%.4f", rms)))\n", stderr)
+                    Self.logger.info("语音开始 (RMS=\(String(format: "%.4f", rms)))")
                 }
                 accumulated.append(contentsOf: frame)
                 silentFrames = 0
@@ -208,7 +213,7 @@ class EnergyVAD: VoiceActivityDetectorProtocol {
                     if silentFrames >= silenceFrameThreshold {
                         // 静音超过阈值，语音结束
                         inSpeech = false
-                        fputs("[EnergyVAD] 语音结束 (静音帧=\(silentFrames))\n", stderr)
+                        Self.logger.info("语音结束 (静音帧=\(self.silentFrames))")
 
                         if accumulated.count >= minSpeechSamples {
                             // 去掉末尾静音部分
@@ -220,9 +225,9 @@ class EnergyVAD: VoiceActivityDetectorProtocol {
                                 startSample: speechStart,
                                 duration: duration
                             ))
-                            fputs("[EnergyVAD] 输出语音段: \(String(format: "%.2f", duration))s\n", stderr)
+                            Self.logger.info("输出语音段: \(String(format: "%.2f", duration))s")
                         } else {
-                            fputs("[EnergyVAD] 丢弃短语音段 (\(accumulated.count) 样本 < 最小 \(minSpeechSamples))\n", stderr)
+                            Self.logger.info("丢弃短语音段 (\(self.accumulated.count) 样本 < 最小 \(self.minSpeechSamples))")
                         }
                         accumulated = []
                     }
@@ -246,7 +251,7 @@ class EnergyVAD: VoiceActivityDetectorProtocol {
                 duration: duration
             )
             accumulated = []
-            fputs("[EnergyVAD] flush 输出语音段: \(String(format: "%.2f", duration))s\n", stderr)
+            Self.logger.info("flush 输出语音段: \(String(format: "%.2f", duration))s")
             return [seg]
         }
         accumulated = []
@@ -274,6 +279,8 @@ class EnergyVAD: VoiceActivityDetectorProtocol {
 /// 优先 silero-vad，fallback 能量阈值
 class VoiceActivityDetector {
 
+    private static let logger = Logger(subsystem: "com.urdao.voiceinput", category: "VoiceActivityDetector")
+
     private var impl: VoiceActivityDetectorProtocol
     private(set) var backendName: String
 
@@ -288,11 +295,11 @@ class VoiceActivityDetector {
         if let silero = SileroVAD(modelPath: modelPath) {
             impl = silero
             backendName = "silero-vad"
-            fputs("[VAD] 使用 silero-vad 后端\n", stderr)
+            Self.logger.info("使用 silero-vad 后端")
         } else {
             impl = EnergyVAD(threshold: energyThreshold)
             backendName = "energy-threshold"
-            fputs("[VAD] 回退到能量阈值 VAD（未找到 silero-vad 模型）\n", stderr)
+            Self.logger.info("回退到能量阈值 VAD（未找到 silero-vad 模型）")
         }
     }
 

@@ -28,8 +28,8 @@ DMG_NAME="$APP_NAME-v$APP_VERSION-macos-arm64.dmg"
 DMG_PATH="$DIST_DIR/$DMG_NAME"
 
 # ─── 颜色输出 ────────────────────────────────────────────────────────────────
-RED='\2.0.0;31m'; GREEN='\2.0.0;32m'; YELLOW='\033[1;33m'
-BLUE='\2.0.0;34m'; NC='\2.0.0m'
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+BLUE='\033[0;34m'; NC='\033[0m'
 info()    { echo -e "${BLUE}[INFO]${NC} $*"; }
 success() { echo -e "${GREEN}[✅]${NC} $*"; }
 warn()    { echo -e "${YELLOW}[WARN]${NC} $*"; }
@@ -84,13 +84,12 @@ elif [ -f "/tmp/AppIcon.icns" ]; then
     cp "/tmp/AppIcon.icns" "$APP_RESOURCES/AppIcon.icns"
 else
     warn "  AppIcon.icns 不存在，跳过（使用系统默认图标）"
+fi
 
 # 3e. 默认配置文件
 if [ -f "$SCRIPT_DIR/Resources/default-config.json" ]; then
     info "  复制默认配置..."
     cp "$SCRIPT_DIR/Resources/default-config.json" "$APP_RESOURCES/default-config.json"
-fi
-    # 去掉 Info.plist 中的 CFBundleIconFile 键（不影响运行）
 fi
 
 # 3e. int8 模型（不复制 float32 的 model.onnx，太大）
@@ -161,9 +160,9 @@ for dylib in "$APP_FRAMEWORKS"/*.dylib; do
     info "    已签名: $(basename "$dylib")"
 done
 
-# 签名整个 bundle（deep 确保一致性）
+# 签名整个 bundle（不要使用 --deep，避免嵌套签名不一致）
 info "  签名 .app bundle..."
-codesign --force --deep --sign - "$APP_BUNDLE" 2>&1 | grep -v "replacing existing signature" || true
+codesign --force --sign - "$APP_BUNDLE" 2>&1 | grep -v "replacing existing signature" || true
 
 success "代码签名完成"
 echo ""

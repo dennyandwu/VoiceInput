@@ -4,9 +4,12 @@
 // Copyright (c) 2026 urDAO Investment
 
 import Foundation
+import os
 
 /// TextPostProcessor 对 ASR 原始输出进行清理和规范化
 struct TextPostProcessor {
+
+    private static let logger = Logger(subsystem: "com.urdao.voiceinput", category: "TextPostProcessor")
 
     /// 清理识别结果文本
     /// - Parameter raw: ASR 原始输出
@@ -99,7 +102,7 @@ struct TextPostProcessor {
                   (0x30A0...0x30FF).contains(scalar.value))
             })
             if cleanedText != beforeClean {
-                fputs("[PostProcessor] 清理日语假名: \"\(beforeClean)\" → \"\(cleanedText)\"\n", stderr)
+                Self.logger.info("清理日语假名: \"\(beforeClean, privacy: .private)\" → \"\(cleanedText, privacy: .private)\"")
             }
         }
 
@@ -110,7 +113,7 @@ struct TextPostProcessor {
                 !(0xAC00...0xD7AF).contains(scalar.value)
             })
             if cleanedText != beforeClean {
-                fputs("[PostProcessor] 清理韩文字符: \"\(beforeClean)\" → \"\(cleanedText)\"\n", stderr)
+                Self.logger.info("清理韩文字符: \"\(beforeClean, privacy: .private)\" → \"\(cleanedText, privacy: .private)\"")
             }
         }
 
@@ -118,7 +121,7 @@ struct TextPostProcessor {
 
         // 清理后为空，说明整段都是非白名单语言
         if cleanedText.isEmpty {
-            fputs("[PostProcessor] 清理后文本为空，丢弃\n", stderr)
+            Self.logger.info("清理后文本为空，丢弃")
             return ("", detectedLang)
         }
 
@@ -134,19 +137,19 @@ struct TextPostProcessor {
         }
 
         if hasJapaneseKana && !allowed.contains("ja") {
-            fputs("[PostProcessor] 检测到日文假名字符，结果无效，丢弃\n", stderr)
+            Self.logger.info("检测到日文假名字符，结果无效，丢弃")
             return ("", detectedLang)
         }
 
         // 日语误判处理：文本是汉字（中日共享），重映射为中文
         if detectedLang == "ja" && allowed.contains("zh") {
-            fputs("[PostProcessor] 语言重映射: ja → zh（纯汉字内容）\n", stderr)
+            Self.logger.info("语言重映射: ja → zh（纯汉字内容）")
             return (cleanedText, "zh")
         }
 
         // 粤语误判处理
         if detectedLang == "yue" && allowed.contains("zh") {
-            fputs("[PostProcessor] 语言重映射: yue → zh\n", stderr)
+            Self.logger.info("语言重映射: yue → zh")
             return (cleanedText, "zh")
         }
 
@@ -154,7 +157,7 @@ struct TextPostProcessor {
         if detectedLang == "ko" && !allowed.contains("ko") {
             let hasKorean = cleanedText.unicodeScalars.contains { (0xAC00...0xD7AF).contains($0.value) }
             if hasKorean {
-                fputs("[PostProcessor] 检测到韩文字符，结果无效，丢弃\n", stderr)
+                Self.logger.info("检测到韩文字符，结果无效，丢弃")
                 return ("", detectedLang)
             }
             let fallback = allowed.contains("zh") ? "zh" : (allowed.first ?? "en")
@@ -163,7 +166,7 @@ struct TextPostProcessor {
 
         // 其他情况
         let fallback = allowed.contains("zh") ? "zh" : (allowed.first ?? "en")
-        fputs("[PostProcessor] 语言重映射: \(detectedLang) → \(fallback)\n", stderr)
+        Self.logger.info("语言重映射: \(detectedLang) → \(fallback)")
         return (cleanedText, fallback)
     }
 
@@ -177,7 +180,7 @@ struct TextPostProcessor {
     static func fixMixedPunctuation(_ text: String) -> String {
         guard !text.isEmpty else { return text }
 
-        var chars = Array(text)
+        let chars = Array(text)
         var result = [Character]()
         result.reserveCapacity(chars.count)
 

@@ -1,9 +1,12 @@
 import Foundation
 import Security
+import os
 
 /// 简单的 Keychain 存取封装
 /// 优先使用 Data Protection Keychain，ad-hoc 签名失败时自动降级到 legacy Keychain
 enum KeychainHelper {
+
+    private static let logger = Logger(subsystem: "com.urdao.voiceinput", category: "KeychainHelper")
 
     /// 尝试写入 Data Protection Keychain，失败则降级到 legacy Keychain
     static func set(_ value: String, service: String, account: String) {
@@ -24,13 +27,13 @@ enum KeychainHelper {
 
         let dpStatus = SecItemAdd(dpQuery as CFDictionary, nil)
         if dpStatus == errSecSuccess {
-            fputs("[Keychain] 写入成功 (Data Protection): \(account)\n", stderr)
+            Self.logger.info("写入成功 (Data Protection): \(account)")
             return
         }
 
         // Data Protection 失败（-34018 = errSecMissingEntitlement，ad-hoc 签名常见）
         // 降级到 legacy Keychain
-        fputs("[Keychain] Data Protection 写入失败 (\(dpStatus))，降级到 legacy keychain\n", stderr)
+        Self.logger.info("Data Protection 写入失败 (\(dpStatus))，降级到 legacy keychain")
 
         let legacyQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -42,9 +45,9 @@ enum KeychainHelper {
 
         let legacyStatus = SecItemAdd(legacyQuery as CFDictionary, nil)
         if legacyStatus == errSecSuccess {
-            fputs("[Keychain] 写入成功 (legacy): \(account)\n", stderr)
+            Self.logger.info("写入成功 (legacy): \(account)")
         } else {
-            fputs("[Keychain] legacy 写入也失败: \(legacyStatus)\n", stderr)
+            Self.logger.info("legacy 写入也失败: \(legacyStatus)")
         }
     }
 

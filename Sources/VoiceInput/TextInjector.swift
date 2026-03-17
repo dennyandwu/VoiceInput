@@ -7,6 +7,7 @@ import Foundation
 import AppKit
 import CoreGraphics
 import ApplicationServices
+import os
 
 /// TextInjector 将识别文本注入当前活跃窗口
 ///
@@ -14,6 +15,8 @@ import ApplicationServices
 /// - clipboard（主方案）：保存剪贴板 → 写入识别文本 → 模拟 Cmd+V → 恢复剪贴板
 /// - accessibility（备选）：通过 AXUIElement 直接写入焦点元素
 class TextInjector {
+
+    private static let logger = Logger(subsystem: "com.urdao.voiceinput", category: "TextInjector")
 
     // MARK: - Types
 
@@ -46,7 +49,7 @@ class TextInjector {
         case .keyboard:
             let success = injectViaKeyboardSimulation(text: text)
             if !success {
-                fputs("[TextInjector] Keyboard 注入失败，降级到 clipboard\n", stderr)
+                Self.logger.warning("Keyboard 注入失败，降级到 clipboard")
                 return injectViaClipboard(text: text)
             }
             return true
@@ -55,7 +58,7 @@ class TextInjector {
         case .accessibility:
             let success = injectViaAccessibility(text: text)
             if !success {
-                fputs("[TextInjector] Accessibility 注入失败，降级到 clipboard\n", stderr)
+                Self.logger.warning("Accessibility 注入失败，降级到 clipboard")
                 return injectViaClipboard(text: text)
             }
             return true
@@ -74,12 +77,12 @@ class TextInjector {
 
         // 1. 保存当前剪贴板所有内容
         let savedItems = saveClipboard(pasteboard: pasteboard)
-        fputs("[TextInjector] 剪贴板已保存（\(savedItems.count) 项）\n", stderr)
+        Self.logger.info("剪贴板已保存（\(savedItems.count) 项）")
 
         // 2. 清空剪贴板，写入识别文本
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
-        fputs("[TextInjector] 写入识别文本到剪贴板\n", stderr)
+        Self.logger.info("写入识别文本到剪贴板")
 
         // 3. 短暂等待确保剪贴板就绪
         Thread.sleep(forTimeInterval: 0.05)
@@ -87,16 +90,16 @@ class TextInjector {
         // 4. 模拟 Cmd+V
         let didPost = postCmdV()
         if !didPost {
-            fputs("[TextInjector] ⚠️  Cmd+V 发送失败\n", stderr)
+            Self.logger.warning("⚠️ Cmd+V 发送失败")
         } else {
-            fputs("[TextInjector] ✅ Cmd+V 已发送\n", stderr)
+            Self.logger.info("✅ Cmd+V 已发送")
         }
 
         // 5. 延迟恢复剪贴板（给目标应用时间处理粘贴）
         let restoreMs = restoreDelayMs
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(restoreMs)) { [weak self] in
             self?.restoreClipboard(pasteboard: pasteboard, items: savedItems)
-            fputs("[TextInjector] 剪贴板已恢复\n", stderr)
+            Self.logger.info("剪贴板已恢复")
         }
 
         return didPost
@@ -109,10 +112,10 @@ class TextInjector {
     private func injectViaKeyboardSimulation(text: String) -> Bool {
         // H10: 焦点检查 — 确认有前台应用
         guard let frontApp = NSWorkspace.shared.frontmostApplication else {
-            fputs("[TextInjector] ⚠️ 无前台应用，跳过注入\n", stderr)
+            Self.logger.warning("⚠️ 无前台应用，跳过注入")
             return false
         }
-        fputs("[TextInjector] 使用 CGEvent Unicode 注入 → \(frontApp.localizedName ?? "unknown")\n", stderr)
+        Self.logger.info("使用 CGEvent Unicode 注入 → \(frontApp.localizedName ?? "unknown")")
 
         let utf16 = Array(text.utf16)
         let chunkSize = 20  // CGEvent 限制每次最多 ~20 个 UTF-16 code unit
@@ -123,7 +126,7 @@ class TextInjector {
 
             guard let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
                   let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) else {
-                fputs("[TextInjector] ❌ CGEvent 创建失败\n", stderr)
+                Self.logger.error("❌ CGEvent 创建失败")
                 return false
             }
 
@@ -138,7 +141,7 @@ class TextInjector {
             Thread.sleep(forTimeInterval: 0.01)
         }
 
-        fputs("[TextInjector] ✅ Unicode 注入完成 (\(utf16.count) chars)\n", stderr)
+        Self.logger.info("✅ Unicode 注入完成 (\(utf16.count) chars)")
         return true
     }
 
@@ -189,7 +192,7 @@ class TextInjector {
         guard let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: vKeyCode, keyDown: true),
               let keyUp   = CGEvent(keyboardEventSource: nil, virtualKey: vKeyCode, keyDown: false)
         else {
-            fputs("[TextInjector] CGEvent 创建失败\n", stderr)
+            Self.logger.error("CGEvent 创建失败")
             return false
         }
 
@@ -211,7 +214,7 @@ class TextInjector {
     /// 通过 AXUIElement 直接向焦点元素写入文本
     private func injectViaAccessibility(text: String) -> Bool {
         guard AXIsProcessTrusted() else {
-            fputs("[TextInjector] 辅助功能权限未授予\n", stderr)
+            Self.logger.warning("辅助功能权限未授予")
             return false
         }
 
@@ -226,7 +229,7 @@ class TextInjector {
         )
 
         guard result == .success, let element = focusedElement else {
-            fputs("[TextInjector] 无法获取焦点元素：\(result.rawValue)\n", stderr)
+            Self.logger.warning("无法获取焦点元素：\(result.rawValue)")
             return false
         }
 
@@ -240,7 +243,7 @@ class TextInjector {
         )
 
         if setValue == .success {
-            fputs("[TextInjector] ✅ Accessibility 注入成功\n", stderr)
+            Self.logger.info("✅ Accessibility 注入成功")
             return true
         }
 
@@ -252,11 +255,11 @@ class TextInjector {
         )
 
         if insertResult == .success {
-            fputs("[TextInjector] ✅ Accessibility 插入文本成功\n", stderr)
+            Self.logger.info("✅ Accessibility 插入文本成功")
             return true
         }
 
-        fputs("[TextInjector] Accessibility 注入失败：value=\(setValue.rawValue), selectedText=\(insertResult.rawValue)\n", stderr)
+        Self.logger.warning("Accessibility 注入失败：value=\(setValue.rawValue), selectedText=\(insertResult.rawValue)")
         return false
     }
 }

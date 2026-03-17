@@ -5,10 +5,13 @@
 
 import Foundation
 import AppKit
+import os
 
 /// RecordingOverlayWindow 在录音时显示一个半透明悬浮窗
 /// 包含：录音时间、音量波形、状态文字
 final class RecordingOverlayWindow {
+
+    private static let logger = Logger(subsystem: "com.urdao.voiceinput", category: "RecordingOverlayWindow")
 
     // MARK: - Properties
 

@@ -1,0 +1,46 @@
+included:
+  - Sources
+
+excluded:
+  - .build
+  - dist
+  - sherpa-onnx-v1.12.28-osx-universal2-shared
+
+opt_in_rules:
+  - closure_spacing
+  - empty_count
+  - explicit_init
+  - force_unwrapping
+  - implicit_return
+  - private_over_fileprivate
+  - redundant_nil_coalescing
+  - sorted_imports
+  - unused_declaration
+
+disabled_rules:
+  - trailing_whitespace
+  - todo
+
+line_length:
+  warning: 120
+  error: 150
+
+function_body_length:
+  warning: 50
+  error: 90
+
+type_body_length:
+  warning: 350
+  error: 600
+
+identifier_name:
+  min_length: 2
+  max_length:
+    warning: 40
+    error: 60
+  excluded:
+    - id
+    - i
+    - j
+
+reporter: "xcode"

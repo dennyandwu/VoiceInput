@@ -5,12 +5,15 @@
 
 import Foundation
 import AVFoundation
+import os
 
 /// AudioRecorder 封装 AVAudioEngine 实时麦克风录音
 /// - 采样率：16kHz，单声道，Float32
 /// - 支持实时 buffer 回调（用于 VAD）
 /// - 线程安全：内部使用 DispatchQueue 同步
 class AudioRecorder {
+
+    private static let logger = Logger(subsystem: "com.urdao.voiceinput", category: "AudioRecorder")
 
     // MARK: - 配置
 
@@ -61,7 +64,7 @@ class AudioRecorder {
         lock.lock()
         guard !_isRecording else {
             lock.unlock()
-            fputs("[AudioRecorder] 已在录音中\n", stderr)
+            Self.logger.debug("已在录音中")
             return false
         }
         lock.unlock()
@@ -69,8 +72,8 @@ class AudioRecorder {
         let inputNode = engine.inputNode
         let inputFormat = inputNode.inputFormat(forBus: 0)
 
-        fputs("[AudioRecorder] 设备格式: \(inputFormat)\n", stderr)
-        fputs("[AudioRecorder] 目标格式: 16kHz 单声道 Float32\n", stderr)
+        Self.logger.info("设备格式: \(inputFormat)")
+        Self.logger.info("目标格式: 16kHz 单声道 Float32")
 
         // 构建目标格式：16kHz 单声道 Float32
         guard let fmt = AVAudioFormat(
@@ -79,7 +82,7 @@ class AudioRecorder {
             channels: AudioRecorder.targetChannels,
             interleaved: false
         ) else {
-            fputs("[AudioRecorder] ERROR: 无法创建目标音频格式\n", stderr)
+            Self.logger.error("无法创建目标音频格式")
             return false
         }
         targetFormat = fmt
@@ -93,14 +96,14 @@ class AudioRecorder {
 
         if needsConversion {
             guard let conv = AVAudioConverter(from: inputFormat, to: fmt) else {
-                fputs("[AudioRecorder] ERROR: 无法创建 AVAudioConverter\n", stderr)
+                Self.logger.error("无法创建 AVAudioConverter")
                 return false
             }
             converter = conv
-            fputs("[AudioRecorder] 启用格式转换: \(inputFormat.sampleRate)Hz \(inputFormat.channelCount)ch → 16kHz 1ch\n", stderr)
+            Self.logger.info("启用格式转换: \(inputFormat.sampleRate)Hz \(inputFormat.channelCount)ch → 16kHz 1ch")
         } else {
             converter = nil
-            fputs("[AudioRecorder] 设备原生 16kHz 单声道，无需转换\n", stderr)
+            Self.logger.info("设备原生 16kHz 单声道，无需转换")
         }
 
         // 清空 buffer
@@ -124,7 +127,7 @@ class AudioRecorder {
             engine.prepare()
             try engine.start()
         } catch {
-            fputs("[AudioRecorder] ERROR: AVAudioEngine 启动失败: \(error)\n", stderr)
+            Self.logger.error("AVAudioEngine 启动失败: \(error.localizedDescription)")
             inputNode.removeTap(onBus: 0)
             lock.lock()
             _isRecording = false
@@ -132,7 +135,7 @@ class AudioRecorder {
             return false
         }
 
-        fputs("[AudioRecorder] 开始录音 ✅\n", stderr)
+        Self.logger.info("开始录音 ✅")
         onRecordingStarted?()
         return true
     }
@@ -143,7 +146,7 @@ class AudioRecorder {
         lock.lock()
         guard _isRecording else {
             lock.unlock()
-            fputs("[AudioRecorder] 未在录音\n", stderr)
+            Self.logger.debug("未在录音")
             return []
         }
         lock.unlock()
@@ -166,7 +169,7 @@ class AudioRecorder {
         converter = nil
         targetFormat = nil
 
-        fputs("[AudioRecorder] 停止录音，采集 \(result.count) 样本 (\(String(format: "%.2f", Double(result.count) / AudioRecorder.targetSampleRate))s)\n", stderr)
+        Self.logger.info("停止录音，采集 \(result.count) 样本 (\(String(format: "%.2f", Double(result.count) / AudioRecorder.targetSampleRate))s)")
         onRecordingStopped?()
         return result
     }
@@ -203,7 +206,7 @@ class AudioRecorder {
             conv.reset()
 
             if let err = error {
-                fputs("[AudioRecorder] 格式转换错误: \(err)\n", stderr)
+                Self.logger.error("格式转换错误: \(err.localizedDescription)")
                 return
             }
 
@@ -245,6 +248,8 @@ class AudioRecorder {
 /// 用于无麦克风环境（如 Mac mini）的测试
 class SimulatedAudioSource {
 
+    private static let logger = Logger(subsystem: "com.urdao.voiceinput", category: "SimulatedAudioSource")
+
     private(set) var samples: [Float] = []
     private(set) var sampleRate: Double = 16000
 
@@ -274,7 +279,7 @@ class SimulatedAudioSource {
                 ))
             } else {
                 guard let converter = AVAudioConverter(from: format, to: targetFormat) else {
-                    fputs("[SimulatedAudioSource] ERROR: 无法创建 converter\n", stderr)
+                    Self.logger.error("无法创建 converter")
                     return false
                 }
 
@@ -300,7 +305,7 @@ class SimulatedAudioSource {
                 converter.convert(to: outputBuffer, error: &error, withInputFrom: inputBlock)
 
                 if let err = error {
-                    fputs("[SimulatedAudioSource] ERROR: 转换失败: \(err)\n", stderr)
+                    Self.logger.error("转换失败: \(err.localizedDescription)")
                     return false
                 }
 
@@ -311,10 +316,10 @@ class SimulatedAudioSource {
                 sampleRate = 16000
             }
 
-            fputs("[SimulatedAudioSource] 加载 \(fileURL.lastPathComponent): \(samples.count) 样本 (\(String(format: "%.2f", Double(samples.count) / 16000))s)\n", stderr)
+            Self.logger.info("加载 \(fileURL.lastPathComponent): \(self.samples.count) 样本 (\(String(format: "%.2f", Double(self.samples.count) / 16000))s)")
             return true
         } catch {
-            fputs("[SimulatedAudioSource] ERROR: 读取文件失败: \(error)\n", stderr)
+            Self.logger.error("读取文件失败: \(error.localizedDescription)")
             return false
         }
     }

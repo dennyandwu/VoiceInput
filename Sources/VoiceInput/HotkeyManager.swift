@@ -6,6 +6,7 @@
 import Foundation
 import CoreGraphics
 import AppKit
+import os
 
 /// HotkeyManager 管理全局热键（无需应用获取焦点）
 /// 使用 CGEvent tap 监听全局键盘事件（需辅助功能权限）
@@ -14,6 +15,8 @@ import AppKit
 /// - pushToTalk: 按住触发录音，松开停止
 /// - toggle: 按一次开始录音，再按一次停止
 class HotkeyManager {
+
+    private static let logger = Logger(subsystem: "com.urdao.voiceinput", category: "HotkeyManager")
 
     // MARK: - Types
 
@@ -68,12 +71,12 @@ class HotkeyManager {
     @discardableResult
     func start() -> Bool {
         guard !isListening else {
-            fputs("[HotkeyManager] 已在监听中\n", stderr)
+            Self.logger.debug("已在监听中")
             return true
         }
 
         guard HotkeyManager.checkAccessibility() else {
-            fputs("[HotkeyManager] ❌ 辅助功能权限未授予\n", stderr)
+            Self.logger.error("❌ 辅助功能权限未授予")
             HotkeyManager.requestAccessibility()
             return false
         }
@@ -96,7 +99,7 @@ class HotkeyManager {
             callback: hotkeyEventCallback,
             userInfo: selfPtr
         ) else {
-            fputs("[HotkeyManager] ❌ 无法创建事件 tap（权限可能未生效，需重启应用）\n", stderr)
+            Self.logger.error("❌ 无法创建事件 tap（权限可能未生效，需重启应用）")
             Unmanaged<HotkeyManager>.fromOpaque(selfPtr).release()
             return false
         }
@@ -109,7 +112,7 @@ class HotkeyManager {
         self.runLoopSource = source
         self.isListening = true
 
-        fputs("[HotkeyManager] ✅ 开始监听，模式=\(mode == .pushToTalk ? "PTT" : "Toggle")，keyCode=0x\(String(triggerKeyCode, radix: 16))\n", stderr)
+        Self.logger.info("✅ 开始监听，模式=\(self.mode == .pushToTalk ? "PTT" : "Toggle")，keyCode=0x\(String(self.triggerKeyCode, radix: 16))")
         return true
     }
 
@@ -138,7 +141,7 @@ class HotkeyManager {
         selfRetained = nil
         isListening = false
 
-        fputs("[HotkeyManager] 已停止监听\n", stderr)
+        Self.logger.info("已停止监听")
     }
 
     // MARK: - Event Handling (called from C callback)
@@ -192,7 +195,7 @@ class HotkeyManager {
                 guard !pttActive else { return true }
                 pttActive = true
                 pttPressTime = Date()
-                fputs("[HotkeyManager] PTT flagsChanged → 开始录音\n", stderr)
+                Self.logger.info("PTT flagsChanged → 开始录音")
                 onRecordStart?()
             } else {
                 guard pttActive else { return true }
@@ -208,14 +211,14 @@ class HotkeyManager {
                         guard let self = self, self.pttActive else { return }
                         // 再次检查按键状态（可能用户又按下了）
                         self.pttActive = false
-                        fputs("[HotkeyManager] PTT 防抖延迟 → 停止录音 (held \(String(format: "%.2f", elapsed + remaining))s)\n", stderr)
+                        Self.logger.info("PTT 防抖延迟 → 停止录音 (held \(String(format: "%.2f", elapsed + remaining))s)")
                         self.onRecordStop?()
                     }
                     timer.resume()
                     pttReleaseTimer = timer
                 } else {
                     pttActive = false
-                    fputs("[HotkeyManager] PTT flagsChanged → 停止录音 (held \(String(format: "%.2f", elapsed))s)\n", stderr)
+                    Self.logger.info("PTT flagsChanged → 停止录音 (held \(String(format: "%.2f", elapsed))s)")
                     onRecordStop?()
                 }
             }
@@ -223,11 +226,11 @@ class HotkeyManager {
             if isPressed {
                 if isRecording {
                     isRecording = false
-                    fputs("[HotkeyManager] Toggle flagsChanged → 停止录音\n", stderr)
+                    Self.logger.info("Toggle flagsChanged → 停止录音")
                     onRecordStop?()
                 } else {
                     isRecording = true
-                    fputs("[HotkeyManager] Toggle flagsChanged → 开始录音\n", stderr)
+                    Self.logger.info("Toggle flagsChanged → 开始录音")
                     onRecordStart?()
                 }
             }
@@ -240,13 +243,13 @@ class HotkeyManager {
         case .keyDown:
             guard !pttActive else { return }  // 忽略长按重复
             pttActive = true
-            fputs("[HotkeyManager] PTT keyDown → 开始录音\n", stderr)
+            Self.logger.info("PTT keyDown → 开始录音")
             onRecordStart?()
 
         case .keyUp:
             guard pttActive else { return }
             pttActive = false
-            fputs("[HotkeyManager] PTT keyUp → 停止录音\n", stderr)
+            Self.logger.info("PTT keyUp → 停止录音")
             onRecordStop?()
 
         default:
@@ -259,11 +262,11 @@ class HotkeyManager {
 
         if isRecording {
             isRecording = false
-            fputs("[HotkeyManager] Toggle → 停止录音\n", stderr)
+            Self.logger.info("Toggle → 停止录音")
             onRecordStop?()
         } else {
             isRecording = true
-            fputs("[HotkeyManager] Toggle → 开始录音\n", stderr)
+            Self.logger.info("Toggle → 开始录音")
             onRecordStart?()
         }
     }
@@ -277,13 +280,12 @@ class HotkeyManager {
 
     /// 引导用户开启辅助功能权限
     static func requestAccessibility() {
-        fputs("""
-        [HotkeyManager] 需要辅助功能权限才能监听全局热键。
+        Self.logger.info("""
+        需要辅助功能权限才能监听全局热键。
         请前往：系统设置 → 隐私与安全性 → 辅助功能
         将运行本程序的终端（如 Terminal.app）添加到允许列表。
         修改后重启本程序。
-        \n
-        """, stderr)
+        """)
 
         // 触发系统权限请求对话框
         let options: NSDictionary = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true]

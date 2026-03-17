@@ -5,12 +5,15 @@
 
 import Foundation
 import SQLite3
+import os
 
 /// Swift 不自动导入 SQLITE_TRANSIENT，手动定义
 private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
 /// WordLibraryManager 提供本地 SQLite 词库，支持识别结果修正、热词加权、使用历史记录
 final class WordLibraryManager {
+
+    private static let logger = Logger(subsystem: "com.urdao.voiceinput", category: "WordLibraryManager")
 
     // MARK: - Singleton
 
@@ -54,7 +57,7 @@ final class WordLibraryManager {
                 attributes: nil
             )
         } catch {
-            fputs("[WordLibrary] Failed to create directory \(dir): \(error)\n", stderr)
+            Self.logger.error("Failed to create directory \(dir): \(error)")
         }
     }
 
@@ -62,10 +65,10 @@ final class WordLibraryManager {
         let result = sqlite3_open(Self.databasePath, &db)
         if result != SQLITE_OK {
             let msg = db != nil ? String(cString: sqlite3_errmsg(db)) : "unknown error"
-            fputs("[WordLibrary] Failed to open database at \(Self.databasePath): \(msg)\n", stderr)
+            Self.logger.error("Failed to open database at \(Self.databasePath): \(msg)")
             db = nil
         } else {
-            fputs("[WordLibrary] Database opened at \(Self.databasePath)\n", stderr)
+            Self.logger.info("Database opened at \(Self.databasePath)")
             // 开启 WAL 模式提升并发写入性能
             execute("PRAGMA journal_mode=WAL;")
             // 外键约束
@@ -114,7 +117,7 @@ final class WordLibraryManager {
         let seededKey = "WordLibrary.seeded.v3"
         guard !UserDefaults.standard.bool(forKey: seededKey) else { return }
 
-        fputs("[WordLibrary] Seeding default corrections (v2)...\n", stderr)
+        Self.logger.info("Seeding default corrections (v2)...")
 
         let now = Int(Date().timeIntervalSince1970)
         let weight = 10
@@ -191,7 +194,7 @@ final class WordLibraryManager {
                 successCount += 1
             } else if let db = db {
                 let msg = String(cString: sqlite3_errmsg(db))
-                fputs("[WordLibrary] Seed insert failed for '\(entry.original)': \(msg)\n", stderr)
+                Self.logger.error("Seed insert failed for '\(entry.original)': \(msg)")
             }
             sqlite3_finalize(stmt)
         }
@@ -199,7 +202,7 @@ final class WordLibraryManager {
         execute("COMMIT;")
 
         UserDefaults.standard.set(true, forKey: seededKey)
-        fputs("[WordLibrary] Seeded \(successCount)/\(corrections.count) default corrections.\n", stderr)
+        Self.logger.info("Seeded \(successCount)/\(corrections.count) default corrections.")
     }
 
     // MARK: - Core SQL Helpers
@@ -212,7 +215,7 @@ final class WordLibraryManager {
         let result = sqlite3_exec(db, sql, nil, nil, &errMsg)
         if result != SQLITE_OK {
             let msg = errMsg != nil ? String(cString: errMsg!) : "unknown"
-            fputs("[WordLibrary] SQL error (\(result)): \(msg)\nSQL: \(sql)\n", stderr)
+            Self.logger.error("SQL error (\(result)): \(msg)\nSQL: \(sql)")
             sqlite3_free(errMsg)
             return false
         }
@@ -226,7 +229,7 @@ final class WordLibraryManager {
         let result = sqlite3_prepare_v2(db, sql, -1, &stmt, nil)
         if result != SQLITE_OK {
             let msg = String(cString: sqlite3_errmsg(db))
-            fputs("[WordLibrary] Failed to prepare statement: \(msg)\nSQL: \(sql)\n", stderr)
+            Self.logger.error("Failed to prepare statement: \(msg)\nSQL: \(sql)")
             return nil
         }
         return stmt
@@ -262,13 +265,6 @@ final class WordLibraryManager {
         let now = Int(Date().timeIntervalSince1970)
 
         // UPSERT: 若 original 已存在则更新
-        let sql = """
-            INSERT INTO words (original, correction, weight, created_at, updated_at)
-            VALUES (?, ?, 1, ?, ?)
-            ON CONFLICT(original) DO UPDATE SET
-                correction = excluded.correction,
-                updated_at = excluded.updated_at;
-        """
         // SQLite ON CONFLICT for non-UNIQUE columns needs a workaround — use manual check
         let checkSql = "SELECT id FROM words WHERE original = ?;"
         guard let checkStmt = prepare(checkSql) else { return }
@@ -285,7 +281,7 @@ final class WordLibraryManager {
             sqlite3_bind_int64(stmt, 2, Int64(now))
             sqlite3_bind_text(stmt, 3, original, -1, SQLITE_TRANSIENT)
             if sqlite3_step(stmt) != SQLITE_DONE {
-                fputs("[WordLibrary] Failed to update correction for '\(original)'\n", stderr)
+                Self.logger.error("Failed to update correction for '\(original)'")
             }
         } else {
             let insertSql = "INSERT INTO words (original, correction, weight, created_at, updated_at) VALUES (?, ?, 1, ?, ?);"
@@ -296,7 +292,7 @@ final class WordLibraryManager {
             sqlite3_bind_int64(stmt, 3, Int64(now))
             sqlite3_bind_int64(stmt, 4, Int64(now))
             if sqlite3_step(stmt) != SQLITE_DONE {
-                fputs("[WordLibrary] Failed to insert correction for '\(original)'\n", stderr)
+                Self.logger.error("Failed to insert correction for '\(original)'")
             }
         }
     }
@@ -316,7 +312,7 @@ final class WordLibraryManager {
         sqlite3_bind_text(logStmt, 2, correction, -1, SQLITE_TRANSIENT)
         sqlite3_bind_int64(logStmt, 3, Int64(now))
         if sqlite3_step(logStmt) != SQLITE_DONE {
-            fputs("[WordLibrary] Failed to insert usage_log for '\(original)'\n", stderr)
+            Self.logger.error("Failed to insert usage_log for '\(original)'")
         }
 
         // 提升 words 表权重
@@ -326,7 +322,7 @@ final class WordLibraryManager {
         sqlite3_bind_int64(updateStmt, 1, Int64(now))
         sqlite3_bind_text(updateStmt, 2, original, -1, SQLITE_TRANSIENT)
         if sqlite3_step(updateStmt) != SQLITE_DONE {
-            fputs("[WordLibrary] Failed to update weight for '\(original)'\n", stderr)
+            Self.logger.error("Failed to update weight for '\(original)'")
         }
     }
 
@@ -340,7 +336,7 @@ final class WordLibraryManager {
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_text(stmt, 1, original, -1, SQLITE_TRANSIENT)
         if sqlite3_step(stmt) != SQLITE_DONE {
-            fputs("[WordLibrary] Failed to delete correction for '\(original)'\n", stderr)
+            Self.logger.error("Failed to delete correction for '\(original)'")
         }
     }
 
@@ -364,7 +360,7 @@ final class WordLibraryManager {
             defer { sqlite3_finalize(stmt) }
             sqlite3_bind_text(stmt, 1, word, -1, SQLITE_TRANSIENT)
             if sqlite3_step(stmt) != SQLITE_DONE {
-                fputs("[WordLibrary] Failed to update hotword weight for '\(word)'\n", stderr)
+                Self.logger.error("Failed to update hotword weight for '\(word)'")
             }
         } else {
             let insertSql = "INSERT INTO hotwords (word, weight) VALUES (?, 1);"
@@ -372,7 +368,7 @@ final class WordLibraryManager {
             defer { sqlite3_finalize(stmt) }
             sqlite3_bind_text(stmt, 1, word, -1, SQLITE_TRANSIENT)
             if sqlite3_step(stmt) != SQLITE_DONE {
-                fputs("[WordLibrary] Failed to insert hotword '\(word)'\n", stderr)
+                Self.logger.error("Failed to insert hotword '\(word)'")
             }
         }
     }
@@ -387,7 +383,7 @@ final class WordLibraryManager {
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_text(stmt, 1, word, -1, SQLITE_TRANSIENT)
         if sqlite3_step(stmt) != SQLITE_DONE {
-            fputs("[WordLibrary] Failed to delete hotword '\(word)'\n", stderr)
+            Self.logger.error("Failed to delete hotword '\(word)'")
         }
     }
 

@@ -6,6 +6,7 @@
 import Foundation
 import AppKit
 import UserNotifications
+import os
 // UserNotifications requires app bundle; use osascript fallback instead
 
 /// AppDelegate 是 GUI 模式的核心协调器
@@ -16,6 +17,8 @@ import UserNotifications
 /// 3. 管理完整 pipeline：热键 → 录音 → 识别 → 文本注入
 /// 4. 响应设置变更（模型切换、模式切换）
 final class AppDelegate: NSObject, NSApplicationDelegate {
+
+    private static let logger = Logger(subsystem: "com.urdao.voiceinput", category: "AppDelegate")
 
     // MARK: - Components
 
@@ -75,13 +78,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        fputs("[AppDelegate] VoiceInput GUI 模式已启动\n", stderr)
-        fputs("[AppDelegate] 模型: \(settings.modelTypeName), 热键: \(settings.triggerKeyName), 模式: \(settings.hotkeyModeName)\n", stderr)
+        Self.logger.info("VoiceInput GUI 模式已启动")
+        Self.logger.info("模型: \(self.settings.modelTypeName), 热键: \(self.settings.triggerKeyName), 模式: \(self.settings.hotkeyModeName)")
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         hotkeyManager.stop()
-        fputs("[AppDelegate] VoiceInput 已退出\n", stderr)
+        Self.logger.info("VoiceInput 已退出")
     }
 
     // MARK: - Component Setup
@@ -105,7 +108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         statusBar.onModelTypeChanged = { [weak self] modelType in
-            fputs("[AppDelegate] 模型已切换为: \(modelType)，重新加载引擎...\n", stderr)
+            Self.logger.info("模型已切换为: \(modelType)，重新加载引擎...")
             self?.loadPipelineAsync()
         }
 
@@ -146,13 +149,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if PermissionManager.checkAccessibility() {
             hotkeyManager.start()
         } else {
-            fputs("[AppDelegate] ⚠️ 辅助功能权限未授予，热键不可用\n", stderr)
+            Self.logger.warning("⚠️ 辅助功能权限未授予，热键不可用")
             PermissionManager.requestAccessibility()
             // 延迟重试，给用户时间去系统设置中授权
             DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
                 if PermissionManager.checkAccessibility() {
                     self?.hotkeyManager.start()
-                    fputs("[AppDelegate] ✅ 辅助功能权限已获得，热键已启动\n", stderr)
+                    Self.logger.info("✅ 辅助功能权限已获得，热键已启动")
                 }
             }
         }
@@ -161,7 +164,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func applyHotkeyMode(_ mode: HotkeyManager.Mode) {
         hotkeyManager.mode = mode
         hotkeyManager.triggerKeyCode = settings.triggerKeyCode
-        fputs("[AppDelegate] 热键模式: \(mode == .pushToTalk ? "PTT" : "Toggle"), keyCode=0x\(String(settings.triggerKeyCode, radix: 16))\n", stderr)
+        Self.logger.info("热键模式: \(mode == .pushToTalk ? "PTT" : "Toggle"), keyCode=0x\(String(self.settings.triggerKeyCode, radix: 16))")
     }
 
     // MARK: - Pipeline 加载
@@ -169,7 +172,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 异步加载（或重新加载）识别引擎
     private func loadPipelineAsync() {
         guard !isLoadingModel else {
-            fputs("[AppDelegate] 模型正在加载中，跳过重复请求\n", stderr)
+            Self.logger.info("模型正在加载中，跳过重复请求")
             return
         }
 
@@ -183,9 +186,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let tokensPath = self.settings.resolveTokensPath()
             let sileroPath = self.settings.resolveSileroModelPath()
 
-            fputs("[AppDelegate] 加载模型: \(modelPath)\n", stderr)
-            fputs("[AppDelegate] Tokens:   \(tokensPath)\n", stderr)
-            fputs("[AppDelegate] Silero:   \(sileroPath)\n", stderr)
+            Self.logger.info("加载模型: \(modelPath)")
+            Self.logger.info("Tokens:   \(tokensPath)")
+            Self.logger.info("Silero:   \(sileroPath)")
 
             let newPipeline = RecognitionPipeline(
                 modelPaths: (model: modelPath, tokens: tokensPath),
@@ -198,12 +201,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.isLoadingModel = false
                 if newPipeline.modelLoaded {
                     self.pipeline = newPipeline
-                    fputs("[AppDelegate] ✅ 模型加载成功 (\(self.settings.modelTypeName))\n", stderr)
+                    Self.logger.info("✅ 模型加载成功 (\(self.settings.modelTypeName))")
 
                     // 尝试加载 Whisper（英文增强，可选）
                     self.tryLoadWhisper(engine: newPipeline.engine)
                 } else {
-                    fputs("[AppDelegate] ❌ 模型加载失败！请检查模型文件路径\n", stderr)
+                    Self.logger.error("❌ 模型加载失败！请检查模型文件路径")
                     self.showAlert(
                         title: "VoiceInput — 模型加载失败",
                         message: "无法加载识别模型：\(modelPath)\n请检查模型文件是否存在。"
@@ -226,9 +229,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func handleRecordStart() {
         guard !isRecording else { return }
         guard let p = pipeline else {
-            fputs("[AppDelegate] ⚠️ 模型未加载，无法开始录音\n", stderr)
+            Self.logger.warning("⚠️ 模型未加载，无法开始录音")
             if isLoadingModel {
-                fputs("[AppDelegate] 模型正在加载中，请稍候...\n", stderr)
+                Self.logger.info("模型正在加载中，请稍候...")
             } else {
                 loadPipelineAsync()
             }
@@ -236,7 +239,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         guard PermissionManager.checkMicrophone() else {
-            fputs("[AppDelegate] ⚠️ 麦克风权限未授予\n", stderr)
+            Self.logger.warning("⚠️ 麦克风权限未授予")
             PermissionManager.requestMicrophone { [weak self] granted in
                 if granted {
                     self?.handleRecordStart()
@@ -245,7 +248,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        fputs("[AppDelegate] 🎙️ 开始录音\n", stderr)
+        Self.logger.info("🎙️ 开始录音")
         isRecording = true
         recordStartTime = Date()
         statusBar.setState(.recording)
@@ -260,7 +263,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 悬浮窗音频电平通过 Pipeline 的回调链获取
 
         if !p.startListening() {
-            fputs("[AppDelegate] ❌ 无法启动录音\n", stderr)
+            Self.logger.error("❌ 无法启动录音")
             isRecording = false
             statusBar.setState(.idle)
             recordingOverlay.hide()
@@ -281,7 +284,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard isRecording else { return }
         guard let p = pipeline else { return }
 
-        fputs("[AppDelegate] ⏹ 停止录音，识别中...\n", stderr)
+        Self.logger.info("⏹ 停止录音，识别中...")
         isRecording = false
 
         // 播放停止录音提示音
@@ -330,9 +333,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let finalStripped = strippedFiltered.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
             if !finalStripped.isEmpty {
                 processedText = strippedFiltered
-                fputs("[AppDelegate] ℹ️ PostProcessor 过滤了原文，降级使用去 token 文本: \"\(strippedFiltered)\"\n", stderr)
+                // 隐私：不记录具体文本内容，只记录长度
+                Self.logger.info("ℹ️ PostProcessor 过滤了原文，降级使用去 token 文本（长度: \(strippedFiltered.count) 字符）")
             } else {
-                fputs("[AppDelegate] ℹ️ 识别结果为空或无意义（原文: \"\(rawText)\"）\n", stderr)
+                Self.logger.info("ℹ️ 识别结果为空或无意义（原文长度: \(rawText.count) 字符）")
                 recordingOverlay.setStatus("未检测到有效语音")
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
                     self?.recordingOverlay.hide()
@@ -346,7 +350,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let beforeCorrection = processedText
         processedText = WordLibraryManager.shared.applyCorrections(to: processedText)
         if processedText != beforeCorrection {
-            fputs("[AppDelegate] 📚 词库修正: \"\(beforeCorrection)\" → \"\(processedText)\"\n", stderr)
+            // 隐私：不记录具体文本内容
+            Self.logger.info("📚 词库修正: \(beforeCorrection.count) 字符 → \(processedText.count) 字符")
         }
 
         // LLM 后处理（可选，需用户开启 + 配置 API Key）
@@ -355,13 +360,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let beforeLLM = processedText
             processedText = llm.process(processedText)
             if processedText != beforeLLM {
-                fputs("[AppDelegate] 🤖 LLM 优化: \"\(beforeLLM)\" → \"\(processedText)\"\n", stderr)
+                // 隐私：不记录具体文本内容
+                Self.logger.info("🤖 LLM 优化: \(beforeLLM.count) 字符 → \(processedText.count) 字符")
             }
         }
 
         let finalText = processedText
 
-        fputs("[AppDelegate] ✅ 识别结果: \"\(finalText)\" [lang=\(lang), RTF=\(String(format: "%.3f", result.processingTime / max(result.duration, 0.001)))]\n", stderr)
+        Self.logger.info("✅ 识别完成 [lang=\(lang), RTF=\(String(format: "%.3f", result.processingTime / max(result.duration, 0.001))), 长度=\(finalText.count) 字符]")
 
         // 更新悬浮窗显示结果
         let displayLang = langName.isEmpty ? "" : "[\(langName)] "
@@ -380,7 +386,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self = self else { return }
             let injected = self.textInjector.inject(text: finalText)
             if !injected {
-                fputs("[AppDelegate] ⚠️ 文本注入失败\n", stderr)
+                Self.logger.warning("⚠️ 文本注入失败")
             }
         }
 
@@ -395,9 +401,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func requestNotificationPermission() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
             if let error = error {
-                fputs("[AppDelegate] 通知权限请求失败: \(error.localizedDescription)\n", stderr)
+                Self.logger.error("通知权限请求失败: \(error.localizedDescription)")
             }
-            fputs("[AppDelegate] 通知权限: \(granted ? "已授权" : "未授权")\n", stderr)
+            Self.logger.info("通知权限: \(granted ? "已授权" : "未授权")")
         }
     }
 
@@ -414,7 +420,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         UNUserNotificationCenter.current().add(request) { error in
             if let error = error {
-                fputs("[AppDelegate] 通知发送失败: \(error.localizedDescription)\n", stderr)
+                Self.logger.error("通知发送失败: \(error.localizedDescription)")
             }
         }
     }
@@ -461,7 +467,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.hotkeyRecorder = recorder  // 防止 ARC 释放
         recorder.onKeyRecorded = { [weak self] keyCode, name in
             guard let self = self else { return }
-            fputs("[AppDelegate] 新热键: keyCode=0x\(String(keyCode, radix: 16)) (\(name))\n", stderr)
+            Self.logger.info("新热键: keyCode=0x\(String(keyCode, radix: 16)) (\(name))")
 
             // 保存设置
             self.settings.triggerKeyCode = keyCode
@@ -471,7 +477,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.hotkeyManager.triggerKeyCode = keyCode
             self.hotkeyManager.start()
 
-            fputs("[AppDelegate] 热键已更新为: \(name)\n", stderr)
+            Self.logger.info("热键已更新为: \(name)")
             self.hotkeyRecorder = nil  // 释放
         }
         recorder.show()
@@ -480,12 +486,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Update Checker
 
     private func checkForUpdate() {
-        fputs("[AppDelegate] 检查更新...\n", stderr)
+        Self.logger.info("检查更新...")
 
         UpdateChecker.checkForUpdate { [weak self] release, error in
             DispatchQueue.main.async {
                 if let error = error {
-                    fputs("[AppDelegate] 检查更新失败: \(error.localizedDescription)\n", stderr)
+                    Self.logger.error("检查更新失败: \(error.localizedDescription)")
                     self?.showAlert(title: "检查更新失败", message: error.localizedDescription)
                     return
                 }
@@ -497,7 +503,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
                 let current = UpdateChecker.currentVersion
                 let isNewer = UpdateChecker.isNewerVersion(release.version, than: current)
-                fputs("[AppDelegate] 版本比较: remote=\(release.version) vs local=\(current) → isNewer=\(isNewer)\n", stderr)
+                Self.logger.info("版本比较: remote=\(release.version) vs local=\(current) → isNewer=\(isNewer)")
 
                 if isNewer {
                     self?.showUpdateAlert(release: release)
@@ -538,14 +544,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func performAutoUpdate(dmgURL: String, expectedSize: Int64) {
-        fputs("[AppDelegate] 开始自动更新: \(dmgURL)\n", stderr)
+        Self.logger.info("开始自动更新: \(dmgURL)")
 
         UpdateChecker.autoUpdate(dmgURL: dmgURL, expectedSize: expectedSize, progress: { pct, status in
-            fputs("[AppDelegate] \(status)\n", stderr)
+            Self.logger.info("\(status)")
         }) { [weak self] success, error in
             if !success {
                 let msg = error?.localizedDescription ?? "未知错误"
-                fputs("[AppDelegate] ❌ 自动更新失败: \(msg)\n", stderr)
+                Self.logger.error("❌ 自动更新失败: \(msg)")
                 self?.showAlert(title: "更新失败", message: msg)
             }
         }
@@ -562,14 +568,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let tokensPath = (whisperDir as NSString).appendingPathComponent(model.tokensFile)
 
         guard FileManager.default.fileExists(atPath: encoderPath) else {
-            fputs("[AppDelegate] Whisper \(model.rawValue) 模型未安装（菜单可下载）\n", stderr)
+            Self.logger.info("Whisper \(model.rawValue) 模型未安装（菜单可下载）")
             return
         }
 
         pipelineQueue.async {
             let success = engine.loadWhisper(encoderPath: encoderPath, decoderPath: decoderPath, tokensPath: tokensPath)
             if success {
-                fputs("[AppDelegate] ✅ Whisper \(model.rawValue) 已启用\n", stderr)
+                Self.logger.info("✅ Whisper \(model.rawValue) 已启用")
             }
         }
     }
@@ -593,7 +599,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
-        fputs("[AppDelegate] 开始下载 Whisper 模型...\n", stderr)
+        Self.logger.info("开始下载 Whisper 模型...")
         SettingsManager.ensureAppSupportDir()
 
         guard let url = URL(string: model.downloadURL) else { return }
@@ -601,7 +607,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let task = URLSession.shared.downloadTask(with: url) { [weak self] tempURL, response, error in
             DispatchQueue.main.async {
                 if let error = error {
-                    fputs("[AppDelegate] ❌ Whisper 下载失败: \(error.localizedDescription)\n", stderr)
+                    Self.logger.error("❌ Whisper 下载失败: \(error.localizedDescription)")
                     self?.showAlert(title: "下载失败", message: error.localizedDescription)
                     return
                 }
@@ -611,7 +617,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     return
                 }
 
-                fputs("[AppDelegate] Whisper 下载完成，解压中...\n", stderr)
+                Self.logger.info("Whisper 下载完成，解压中...")
 
                 let extractDir = FileManager.default.temporaryDirectory.appendingPathComponent("whisper-extract")
                 try? FileManager.default.removeItem(at: extractDir)
@@ -637,7 +643,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         // H4: 路径验证防 Zip Slip
                         let resolved = fileURL.standardizedFileURL.path
                         guard resolved.hasPrefix(extractDir.path) else {
-                            fputs("[AppDelegate] ⚠️ 路径穿越检测，跳过: \(resolved)\n", stderr)
+                            Self.logger.warning("⚠️ 路径穿越检测，跳过: \(resolved)")
                             continue
                         }
                         // 复制所有 .onnx 和 tokens.txt 文件
@@ -647,14 +653,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                 let attrs = try? fm.attributesOfItem(atPath: fileURL.path)
                                 let size = (attrs?[.size] as? Int64) ?? 0
                                 if size < 1_000_000 {  // < 1MB 的 onnx 文件视为异常
-                                    fputs("[AppDelegate] ⚠️ 模型文件过小，跳过: \(name) (\(size) bytes)\n", stderr)
+                                    Self.logger.warning("⚠️ 模型文件过小，跳过: \(name) (\(size) bytes)")
                                     continue
                                 }
                             }
                             let destPath = (whisperDir as NSString).appendingPathComponent(name)
                             try? fm.removeItem(atPath: destPath)
                             try? fm.copyItem(atPath: fileURL.path, toPath: destPath)
-                            fputs("[AppDelegate] 复制: \(name)\n", stderr)
+                            Self.logger.info("复制: \(name)")
                             if name.contains("encoder") { found = true }
                         }
                     }
@@ -663,7 +669,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 try? fm.removeItem(at: extractDir)
 
                 if found {
-                    fputs("[AppDelegate] ✅ Whisper 模型已安装\n", stderr)
+                    Self.logger.info("✅ Whisper 模型已安装")
                     // 立即加载
                     if let pipeline = self?.pipeline {
                         self?.tryLoadWhisper(engine: pipeline.engine)
@@ -707,7 +713,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
-        fputs("[AppDelegate] 开始下载 float32 模型...\n", stderr)
+        Self.logger.info("开始下载 float32 模型...")
 
         let modelDir = SettingsManager.userModelDir
 
@@ -719,7 +725,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let task = URLSession.shared.downloadTask(with: url) { [weak self] tempURL, response, error in
             DispatchQueue.main.async {
                 if let error = error {
-                    fputs("[AppDelegate] ❌ float32 下载失败: \(error.localizedDescription)\n", stderr)
+                    Self.logger.error("❌ float32 下载失败: \(error.localizedDescription)")
                     self?.showAlert(title: "下载失败", message: error.localizedDescription)
                     return
                 }
@@ -730,7 +736,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
 
                 // 解压 tar.bz2 → 提取 model.onnx
-                fputs("[AppDelegate] 下载完成，解压中...\n", stderr)
+                Self.logger.info("下载完成，解压中...")
 
                 let extractDir = FileManager.default.temporaryDirectory.appendingPathComponent("float32-extract")
                 try? FileManager.default.removeItem(at: extractDir)
@@ -760,7 +766,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                 do {
                                     try? fm.removeItem(atPath: actualDest)
                                     try fm.copyItem(atPath: fileURL.path, toPath: actualDest)
-                                    fputs("[AppDelegate] ✅ float32 模型已安装: \(actualDest) (\(size / 1024 / 1024)MB)\n", stderr)
+                                    Self.logger.info("✅ float32 模型已安装: \(actualDest) (\(size / 1024 / 1024)MB)")
 
                                     // 切换到 float32 并重新加载
                                     self?.settings.modelType = "float32"
@@ -769,7 +775,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                     self?.showAlert(title: "模型下载完成",
                                         message: "float32 模型已安装（\(size / 1024 / 1024)MB），已自动切换。")
                                 } catch {
-                                    fputs("[AppDelegate] ❌ 复制 model.onnx 失败: \(error)\n", stderr)
+                                    Self.logger.error("❌ 复制 model.onnx 失败: \(error.localizedDescription)")
                                     self?.showAlert(title: "安装失败", message: error.localizedDescription)
                                 }
                             } else {

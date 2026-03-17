@@ -4,10 +4,14 @@
 
 import Foundation
 import AVFoundation
+import os
 
 /// SpeechEngine 封装 sherpa-onnx SenseVoice 离线识别
 /// 支持中英日韩粤五语混识
 class SpeechEngine {
+
+    static let logger = Logger(subsystem: "com.urdao.voiceinput", category: "SpeechEngine")
+
     private var recognizer: SherpaOnnxOfflineRecognizer?
     private var whisperRecognizer: SherpaOnnxOfflineRecognizer?
     private var modelPath: String = ""
@@ -34,11 +38,11 @@ class SpeechEngine {
 
         // 验证文件存在
         guard FileManager.default.fileExists(atPath: modelPath) else {
-            fputs("[SpeechEngine] ERROR: model not found: \(modelPath)\n", stderr)
+            Self.logger.error("model not found: \(modelPath)")
             return false
         }
         guard FileManager.default.fileExists(atPath: tokensPath) else {
-            fputs("[SpeechEngine] ERROR: tokens not found: \(tokensPath)\n", stderr)
+            Self.logger.error("tokens not found: \(tokensPath)")
             return false
         }
 
@@ -74,8 +78,8 @@ class SpeechEngine {
         self.isLoaded = true
 
         let elapsed = Date().timeIntervalSince(t0)
-        fputs("[SpeechEngine] Model loaded in \(String(format: "%.3f", elapsed))s\n", stderr)
-        fputs("[SpeechEngine] Model: \((modelPath as NSString).lastPathComponent)\n", stderr)
+        Self.logger.info("Model loaded in \(String(format: "%.3f", elapsed))s")
+        Self.logger.info("Model: \((modelPath as NSString).lastPathComponent)")
 
         return true
     }
@@ -93,15 +97,15 @@ class SpeechEngine {
     func loadWhisper(encoderPath: String, decoderPath: String, tokensPath: String, numThreads: Int = 4) -> Bool {
         let fm = FileManager.default
         guard fm.fileExists(atPath: encoderPath) else {
-            fputs("[SpeechEngine] Whisper encoder not found: \(encoderPath)\n", stderr)
+            Self.logger.info("Whisper encoder not found: \(encoderPath)")
             return false
         }
         guard fm.fileExists(atPath: decoderPath) else {
-            fputs("[SpeechEngine] Whisper decoder not found: \(decoderPath)\n", stderr)
+            Self.logger.info("Whisper decoder not found: \(decoderPath)")
             return false
         }
         guard fm.fileExists(atPath: tokensPath) else {
-            fputs("[SpeechEngine] Whisper tokens not found: \(tokensPath)\n", stderr)
+            Self.logger.info("Whisper tokens not found: \(tokensPath)")
             return false
         }
 
@@ -137,8 +141,8 @@ class SpeechEngine {
         self.whisperLoaded = true
 
         let elapsed = Date().timeIntervalSince(t0)
-        fputs("[SpeechEngine] Whisper loaded in \(String(format: "%.3f", elapsed))s\n", stderr)
-        fputs("[SpeechEngine] Whisper encoder: \((encoderPath as NSString).lastPathComponent)\n", stderr)
+        Self.logger.info("Whisper loaded in \(String(format: "%.3f", elapsed))s")
+        Self.logger.info("Whisper encoder: \((encoderPath as NSString).lastPathComponent)")
 
         return true
     }
@@ -149,7 +153,7 @@ class SpeechEngine {
     /// 用 Whisper 识别英文音频
     func recognizeWithWhisper(audioData: [Float], sampleRate: Int = 16000) -> RecognitionResult {
         guard let rec = whisperRecognizer, whisperLoaded else {
-            fputs("[SpeechEngine] Whisper not loaded, falling back to SenseVoice\n", stderr)
+            Self.logger.info("Whisper not loaded, falling back to SenseVoice")
             return recognize(audioData: audioData, sampleRate: sampleRate)
         }
 
@@ -162,9 +166,7 @@ class SpeechEngine {
         let elapsed = Date().timeIntervalSince(t0)
 
         let duration = Double(audioData.count) / Double(sampleRate)
-        fputs("[SpeechEngine] Whisper recognized \(String(format: "%.2f", duration))s "
-            + "in \(String(format: "%.3f", elapsed))s (RTF=\(String(format: "%.3f", elapsed/duration)))\n",
-            stderr)
+        Self.logger.info("Whisper recognized \(String(format: "%.2f", duration))s in \(String(format: "%.3f", elapsed))s (RTF=\(String(format: "%.3f", elapsed/duration)))")
 
         return RecognitionResult(
             text: result.text,
@@ -183,7 +185,7 @@ class SpeechEngine {
     /// - Returns: 识别结果文本，失败返回空字符串
     func recognize(audioData: [Float], sampleRate: Int = 16000) -> RecognitionResult {
         guard let rec = recognizer, isLoaded else {
-            fputs("[SpeechEngine] ERROR: model not loaded\n", stderr)
+            Self.logger.error("model not loaded")
             return RecognitionResult(text: "", lang: "", emotion: "", event: "")
         }
 
@@ -198,9 +200,7 @@ class SpeechEngine {
         let duration = Double(audioData.count) / Double(sampleRate)
         let rtf = elapsed / duration
 
-        fputs("[SpeechEngine] Recognized \(String(format: "%.2f", duration))s audio "
-            + "in \(String(format: "%.3f", elapsed))s (RTF=\(String(format: "%.3f", rtf)))\n",
-            stderr)
+        Self.logger.info("Recognized \(String(format: "%.2f", duration))s audio in \(String(format: "%.3f", elapsed))s (RTF=\(String(format: "%.3f", rtf)))")
 
         return RecognitionResult(
             text: result.text,
@@ -243,11 +243,10 @@ class SpeechEngine {
                 return recognize(audioData: samples)
             } else {
                 // 需要格式转换
-                fputs("[SpeechEngine] Converting audio format: \(format) -> 16kHz mono float32\n",
-                    stderr)
+                Self.logger.info("Converting audio format: \(format) -> 16kHz mono float32")
 
                 guard let converter = AVAudioConverter(from: format, to: targetFormat) else {
-                    fputs("[SpeechEngine] ERROR: Cannot create audio converter\n", stderr)
+                    Self.logger.error("Cannot create audio converter")
                     return RecognitionResult(text: "", lang: "", emotion: "", event: "")
                 }
 
@@ -277,7 +276,7 @@ class SpeechEngine {
                 converter.convert(to: outputBuffer, error: &error, withInputFrom: inputBlock)
 
                 if let err = error {
-                    fputs("[SpeechEngine] ERROR: Conversion failed: \(err)\n", stderr)
+                    Self.logger.error("Conversion failed: \(err)")
                     return RecognitionResult(text: "", lang: "", emotion: "", event: "")
                 }
 
@@ -290,7 +289,7 @@ class SpeechEngine {
                 return recognize(audioData: samples)
             }
         } catch {
-            fputs("[SpeechEngine] ERROR: Cannot read audio file \(fileURL): \(error)\n", stderr)
+            Self.logger.error("Cannot read audio file \(fileURL): \(error)")
             return RecognitionResult(text: "", lang: "", emotion: "", event: "")
         }
     }

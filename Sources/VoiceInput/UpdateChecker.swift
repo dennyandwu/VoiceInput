@@ -5,10 +5,13 @@
 
 import Foundation
 import AppKit
+import os
 
 /// UpdateChecker 检查 GitHub Releases 获取最新版本
 /// 支持自动下载 DMG → 挂载 → 替换 app → 重启
 final class UpdateChecker {
+
+    private static let logger = Logger(subsystem: "com.urdao.voiceinput", category: "UpdateChecker")
 
     // MARK: - Config
 
@@ -66,7 +69,7 @@ final class UpdateChecker {
     /// 跳过某个版本
     static func skipVersion(_ version: String) {
         UserDefaults.standard.set(version, forKey: skippedVersionKey)
-        fputs("[UpdateChecker] 已跳过版本: \(version)\n", stderr)
+        Self.logger.info("已跳过版本: \(version)")
     }
 
     /// 检查更新（异步）
@@ -83,14 +86,14 @@ final class UpdateChecker {
 
         URLSession.shared.dataTask(with: request) { data, response, error in
             if let error = error {
-                fputs("[UpdateChecker] API 请求失败: \(error.localizedDescription)\n", stderr)
+                Self.logger.error("API 请求失败: \(error.localizedDescription)")
                 completion(nil, error)
                 return
             }
 
             // 检查 HTTP 状态码
             if let httpResponse = response as? HTTPURLResponse {
-                fputs("[UpdateChecker] API 状态码: \(httpResponse.statusCode)\n", stderr)
+                Self.logger.info("API 状态码: \(httpResponse.statusCode)")
                 if httpResponse.statusCode != 200 {
                     completion(nil, makeError("GitHub API 返回 \(httpResponse.statusCode)"))
                     return
@@ -118,7 +121,7 @@ final class UpdateChecker {
                        let downloadURL = asset["browser_download_url"] as? String {
                         dmgURL = downloadURL
                         dmgSize = (asset["size"] as? Int64) ?? (asset["size"] as? Int).map { Int64($0) } ?? 0
-                        fputs("[UpdateChecker] DMG: \(name), 大小: \(dmgSize) bytes\n", stderr)
+                        Self.logger.info("DMG: \(name), 大小: \(dmgSize) bytes")
                         break
                     }
                 }
@@ -155,7 +158,7 @@ final class UpdateChecker {
             // 是否已跳过该版本
             let skipped = UserDefaults.standard.string(forKey: skippedVersionKey) ?? ""
             if skipped == info.version {
-                fputs("[UpdateChecker] 版本 \(info.version) 已被跳过\n", stderr)
+                Self.logger.info("版本 \(info.version) 已被跳过")
                 completion(nil)
                 return
             }
@@ -200,7 +203,7 @@ final class UpdateChecker {
                            progress: @escaping (Double, String) -> Void,
                            completion: @escaping (Bool, Error?) -> Void) {
 
-        fputs("[UpdateChecker] 开始自动更新: \(dmgURL)\n", stderr)
+        Self.logger.info("开始自动更新: \(dmgURL)")
         progress(0, "下载更新中...")
 
         downloadDMG(url: dmgURL, expectedSize: expectedSize, progress: { pct in
@@ -223,7 +226,7 @@ final class UpdateChecker {
 
                 if success {
                     progress(1.0, "更新完成，正在重启...")
-                    fputs("[UpdateChecker] ✅ 更新完成，准备重启\n", stderr)
+                    Self.logger.info("✅ 更新完成，准备重启")
 
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                         relaunchApp()
@@ -261,7 +264,7 @@ final class UpdateChecker {
                 if success {
                     let attrs = try? FileManager.default.attributesOfItem(atPath: destPath)
                     let actualSize = (attrs?[.size] as? Int64) ?? 0
-                    fputs("[UpdateChecker] DMG 下载完成: \(actualSize) bytes\n", stderr)
+                    Self.logger.info("DMG 下载完成: \(actualSize) bytes")
 
                     if expectedSize > 0 && actualSize < expectedSize / 2 {
                         completion(nil, makeError("下载文件不完整（\(actualSize / 1024 / 1024)MB / \(expectedSize / 1024 / 1024)MB）"))
@@ -311,14 +314,14 @@ final class UpdateChecker {
 
             guard mountProcess.terminationStatus == 0 else {
                 let output = String(data: mountPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-                fputs("[UpdateChecker] hdiutil 失败: \(output)\n", stderr)
+                Self.logger.error("hdiutil 失败: \(output)")
                 DispatchQueue.main.async {
                     completion(false, makeError("挂载 DMG 失败（exit \(mountProcess.terminationStatus)）"))
                 }
                 return
             }
 
-            fputs("[UpdateChecker] DMG 已挂载到 \(mountPoint)\n", stderr)
+            Self.logger.info("DMG 已挂载到 \(mountPoint)")
 
             let fm = FileManager.default
             guard let contents = try? fm.contentsOfDirectory(atPath: mountPoint),
@@ -336,7 +339,7 @@ final class UpdateChecker {
             let resolvedSource = (sourceApp as NSString).standardizingPath
             let resolvedMount = (mountPoint as NSString).standardizingPath
             guard resolvedSource.hasPrefix(resolvedMount) else {
-                fputs("[UpdateChecker] ⚠️ 路径穿越检测: \(resolvedSource) 不在 \(resolvedMount) 内\n", stderr)
+                Self.logger.warning("⚠️ 路径穿越检测: \(resolvedSource) 不在 \(resolvedMount) 内")
                 detachDMG(mountPoint: mountPoint)
                 DispatchQueue.main.async {
                     completion(false, makeError("安全检查失败：.app 路径异常"))
@@ -346,7 +349,7 @@ final class UpdateChecker {
 
             let destApp = currentAppPath
 
-            fputs("[UpdateChecker] 替换: \(sourceApp) → \(destApp)\n", stderr)
+            Self.logger.info("替换: \(sourceApp) → \(destApp)")
 
             // 验证新 app 的 tokens.txt 完整性
             let tokensPath = "\(sourceApp)/Contents/Resources/models/sense-voice/tokens.txt"
@@ -374,7 +377,7 @@ final class UpdateChecker {
 
             do {
                 try fm.copyItem(atPath: sourceApp, toPath: destApp)
-                fputs("[UpdateChecker] ✅ 新版本已复制到 \(destApp)\n", stderr)
+                Self.logger.info("✅ 新版本已复制到 \(destApp)")
 
                 // C1 安全检查：验证代码签名
                 let codesign = Process()
@@ -386,7 +389,7 @@ final class UpdateChecker {
                 codesign.waitUntilExit()
                 if codesign.terminationStatus != 0 {
                     let signErr = String(data: signPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-                    fputs("[UpdateChecker] ⚠️ 签名验证失败: \(signErr)\n", stderr)
+                    Self.logger.warning("⚠️ 签名验证失败: \(signErr)")
                     // adhoc 签名在非开发机上可能失败，记录但不阻止（等 Developer ID 后改为阻止）
                 }
 
@@ -399,7 +402,7 @@ final class UpdateChecker {
 
                 try? fm.removeItem(atPath: backupPath)
             } catch {
-                fputs("[UpdateChecker] ❌ 复制失败，恢复备份: \(error.localizedDescription)\n", stderr)
+                Self.logger.error("❌ 复制失败，恢复备份: \(error.localizedDescription)")
                 try? fm.removeItem(atPath: destApp)
                 try? fm.moveItem(atPath: backupPath, toPath: destApp)
 
@@ -432,7 +435,7 @@ final class UpdateChecker {
 
     private static func relaunchApp() {
         let appPath = currentAppPath
-        fputs("[UpdateChecker] 重启: \(appPath)\n", stderr)
+        Self.logger.info("重启: \(appPath)")
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/open")

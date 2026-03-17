@@ -1,9 +1,13 @@
 import Foundation
+import os
 
 /// 外部 JSON 配置文件管理器
 /// 配置文件路径: ~/Library/Application Support/VoiceInput/config.json
 /// 修改后重启应用生效
 class ConfigManager {
+
+    static let logger = Logger(subsystem: "com.urdao.voiceinput", category: "ConfigManager")
+
     static let shared = ConfigManager()
 
     /// 配置文件路径
@@ -35,9 +39,9 @@ class ConfigManager {
         if let data = FileManager.default.contents(atPath: defaultPath),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             defaults = json
-            fputs("[Config] 默认配置已加载\n", stderr)
+            Self.logger.info("默认配置已加载")
         } else {
-            fputs("[Config] ⚠️ 未找到 default-config.json，使用硬编码默认值\n", stderr)
+            Self.logger.warning("⚠️ 未找到 default-config.json，使用硬编码默认值")
             defaults = hardcodedDefaults()
         }
     }
@@ -48,12 +52,12 @@ class ConfigManager {
         if let data = FileManager.default.contents(atPath: path),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             config = json
-            fputs("[Config] 用户配置已加载: \(path)\n", stderr)
+            Self.logger.info("用户配置已加载: \(path)")
         } else {
             // 首次运行：拷贝默认配置到用户目录
             config = defaults
             saveConfig()
-            fputs("[Config] 首次运行，已创建配置文件: \(path)\n", stderr)
+            Self.logger.info("首次运行，已创建配置文件: \(path)")
         }
     }
 
@@ -62,14 +66,14 @@ class ConfigManager {
             let data = try JSONSerialization.data(withJSONObject: config, options: [.prettyPrinted, .sortedKeys])
             try data.write(to: URL(fileURLWithPath: ConfigManager.configPath))
         } catch {
-            fputs("[Config] ⚠️ 保存配置失败: \(error.localizedDescription)\n", stderr)
+            Self.logger.warning("⚠️ 保存配置失败: \(error.localizedDescription)")
         }
     }
 
     /// 重新加载配置（菜单可触发）
     func reload() {
         loadConfig()
-        fputs("[Config] 配置已重新加载\n", stderr)
+        Self.logger.info("配置已重新加载")
     }
 
     // MARK: - 读取（支持 dot-path: "routing.zhThreshold"）

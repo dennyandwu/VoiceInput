@@ -6,10 +6,13 @@
 import Foundation
 import AppKit
 import CoreGraphics
+import os
 
 /// HotkeyRecorderWindow 弹出一个小窗口提示用户按键
 /// 录制到按键后通过 onKeyRecorded 回调返回 keyCode
 final class HotkeyRecorderWindow: NSObject {
+
+    private static let logger = Logger(subsystem: "com.urdao.voiceinput", category: "HotkeyRecorderWindow")
 
     var onKeyRecorded: ((UInt16, String) -> Void)?
 
@@ -103,7 +106,7 @@ final class HotkeyRecorderWindow: NSObject {
         }
 
         let name = keyCodeName(keyCode)
-        fputs("[HotkeyRecorder] 录制到按键: keyCode=0x\(String(keyCode, radix: 16)) (\(name))\n", stderr)
+        Self.logger.info("录制到按键: keyCode=0x\(String(keyCode, radix: 16)) (\(name))")
 
         dismiss()
         onKeyRecorded?(keyCode, name)

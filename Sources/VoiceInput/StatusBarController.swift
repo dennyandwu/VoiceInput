@@ -5,6 +5,7 @@
 
 import Foundation
 import AppKit
+import os
 
 /// StatusBarController 管理 macOS 菜单栏图标及弹出菜单
 ///
@@ -17,6 +18,8 @@ import AppKit
 /// - 左键点击：toggle 录音（当 mode == .toggle 时）
 /// - 右键 / 辅助点击：显示菜单
 final class StatusBarController {
+
+    private static let logger = Logger(subsystem: "com.urdao.voiceinput", category: "StatusBarController")
 
     // MARK: - State
 
@@ -565,12 +568,12 @@ final class StatusBarController {
     @objc private func selectLanguageMode(_ sender: NSMenuItem) {
         guard let mode = sender.representedObject as? String else { return }
         settings.languageMode = mode
-        fputs("[StatusBar] 语言模式切换: \(mode) (\(settings.languageModeName))\n", stderr)
+        Self.logger.info("语言模式切换: \(mode) (\(self.settings.languageModeName))")
     }
 
     @objc private func selectWhisperSmallEn() {
         settings.whisperModel = .smallEn
-        fputs("[StatusBar] Whisper 模型切换: small.en\n", stderr)
+        Self.logger.info("Whisper 模型切换: small.en")
         let path = (SettingsManager.whisperModelDir as NSString).appendingPathComponent(SettingsManager.WhisperModel.smallEn.encoderFile)
         if !FileManager.default.fileExists(atPath: path) {
             downloadWhisper()
@@ -584,7 +587,7 @@ final class StatusBarController {
 
     @objc private func selectWhisperLargeV3Turbo() {
         settings.whisperModel = .largeV3
-        fputs("[StatusBar] Whisper 模型切换: large-v3\n", stderr)
+        Self.logger.info("Whisper 模型切换: large-v3")
         let path = (SettingsManager.whisperModelDir as NSString).appendingPathComponent(SettingsManager.WhisperModel.largeV3.encoderFile)
         if !FileManager.default.fileExists(atPath: path) {
             downloadWhisper()
@@ -617,7 +620,7 @@ final class StatusBarController {
 
     @objc private func requestMicPermission() {
         PermissionManager.requestMicrophone { granted in
-            fputs("[StatusBar] 麦克风权限: \(granted ? "已授予" : "被拒绝")\n", stderr)
+            Self.logger.info("麦克风权限: \(granted ? "已授予" : "被拒绝")")
         }
     }
 
@@ -627,7 +630,7 @@ final class StatusBarController {
 
     @objc private func toggleLaunchAtLogin() {
         settings.launchAtLogin = !settings.launchAtLogin
-        fputs("[StatusBar] 开机启动: \(settings.launchAtLogin)\n", stderr)
+        Self.logger.info("开机启动: \(self.settings.launchAtLogin)")
     }
 
     @objc private func openConfigFile() {
@@ -641,14 +644,14 @@ final class StatusBarController {
 
     @objc private func reloadConfig() {
         ConfigManager.shared.reload()
-        fputs("[StatusBar] 配置已重新加载\n", stderr)
+        Self.logger.info("配置已重新加载")
     }
 
     @objc private func openWordLibrary() {
         // 导出词库为可读文本并用 TextEdit 打开
         let dbPath = WordLibraryManager.databasePath
         guard FileManager.default.fileExists(atPath: dbPath) else {
-            fputs("[StatusBar] 词库文件不存在: \(dbPath)\n", stderr)
+            Self.logger.warning("词库文件不存在: \(dbPath)")
             return
         }
 
@@ -671,9 +674,9 @@ final class StatusBarController {
         do {
             try content.write(toFile: exportPath, atomically: true, encoding: .utf8)
             NSWorkspace.shared.open(URL(fileURLWithPath: exportPath))
-            fputs("[StatusBar] 词库已导出: \(exportPath)\n", stderr)
+            Self.logger.info("词库已导出: \(exportPath)")
         } catch {
-            fputs("[StatusBar] 导出词库失败: \(error)\n", stderr)
+            Self.logger.error("导出词库失败: \(error.localizedDescription)")
             // fallback: 直接用 Finder 打开 sqlite 文件所在目录
             NSWorkspace.shared.selectFile(dbPath, inFileViewerRootedAtPath: "")
         }
@@ -692,7 +695,7 @@ final class StatusBarController {
     @objc private func toggleLLM() {
         settings.llmPostProcessingEnabled = !settings.llmPostProcessingEnabled
         let state = settings.llmPostProcessingEnabled ? "开启" : "关闭"
-        fputs("[StatusBar] AI 优化: \(state)\n", stderr)
+        Self.logger.info("AI 优化: \(state)")
 
         if settings.llmPostProcessingEnabled && settings.llmApiKey.isEmpty {
             // 开启但没有 API Key，提示设置
@@ -727,7 +730,7 @@ final class StatusBarController {
                         self?.settings.saveCurrentToPreset(activePreset)
                     }
                 }
-                fputs("[StatusBar] API Key \(key.isEmpty ? "已清除" : "已设置")\n", stderr)
+                Self.logger.info("API Key \(key.isEmpty ? "已清除" : "已设置")")
             }
         }
     }
@@ -751,7 +754,7 @@ final class StatusBarController {
             if response == .alertFirstButtonReturn {
                 let url = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
                 self?.settings.llmApiBaseURL = url
-                fputs("[StatusBar] API 地址: \(url.isEmpty ? "默认 (OpenAI)" : url)\n", stderr)
+                Self.logger.info("API 地址: \(url.isEmpty ? "默认 (OpenAI)" : url)")
             }
         }
     }
@@ -776,7 +779,7 @@ final class StatusBarController {
                 let model = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !model.isEmpty {
                     self?.settings.llmModel = model
-                    fputs("[StatusBar] LLM 模型: \(model)\n", stderr)
+                    Self.logger.info("LLM 模型: \(model)")
                 }
             }
         }
@@ -798,7 +801,7 @@ final class StatusBarController {
             if alert.runModal() == .alertFirstButtonReturn {
                 if let val = Int(input.stringValue), val > 0 {
                     self?.settings.llmMaxTokens = val
-                    fputs("[StatusBar] LLM Max Tokens: \(val)\n", stderr)
+                    Self.logger.info("LLM Max Tokens: \(val)")
                 }
             }
         }
@@ -818,7 +821,7 @@ final class StatusBarController {
             if alert.runModal() == .alertFirstButtonReturn {
                 if let val = Double(input.stringValue), val >= 0, val <= 2.0 {
                     self?.settings.llmTemperature = val
-                    fputs("[StatusBar] LLM Temperature: \(val)\n", stderr)
+                    Self.logger.info("LLM Temperature: \(val)")
                 }
             }
         }
@@ -838,7 +841,7 @@ final class StatusBarController {
             if alert.runModal() == .alertFirstButtonReturn {
                 if let val = Double(input.stringValue), val > 0 {
                     self?.settings.llmTimeout = val
-                    fputs("[StatusBar] LLM Timeout: \(val)s\n", stderr)
+                    Self.logger.info("LLM Timeout: \(val)s")
                 }
             }
         }
@@ -858,7 +861,7 @@ final class StatusBarController {
             if alert.runModal() == .alertFirstButtonReturn {
                 if let val = Int(input.stringValue), val >= 1 {
                     self?.settings.llmMinTextLength = val
-                    fputs("[StatusBar] LLM 最短文本: \(val) 字符\n", stderr)
+                    Self.logger.info("LLM 最短文本: \(val) 字符")
                 }
             }
         }
@@ -878,7 +881,7 @@ final class StatusBarController {
             if alert.runModal() == .alertFirstButtonReturn {
                 if let val = Double(input.stringValue), val >= 0 {
                     self?.settings.shortAudioThreshold = val
-                    fputs("[StatusBar] 短音频阈值: \(val)s\n", stderr)
+                    Self.logger.info("短音频阈值: \(val)s")
                 }
             }
         }

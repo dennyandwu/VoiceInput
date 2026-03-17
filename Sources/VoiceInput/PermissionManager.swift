@@ -7,6 +7,7 @@ import Foundation
 import AppKit
 import AVFoundation
 import ApplicationServices
+import os
 
 /// PermissionManager 集中管理所有需要的系统权限
 ///
@@ -15,6 +16,8 @@ import ApplicationServices
 /// - 辅助功能（Accessibility）：CGEvent tap 全局热键 + 文本注入
 /// - 输入监控（Input Monitoring）：在某些 macOS 版本下需要
 class PermissionManager {
+
+    private static let logger = Logger(subsystem: "com.urdao.voiceinput", category: "PermissionManager")
 
     // MARK: - 麦克风权限
 

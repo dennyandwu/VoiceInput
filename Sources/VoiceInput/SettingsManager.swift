@@ -11,10 +11,13 @@
 
 import Foundation
 import AppKit
+import os
 
 /// SettingsManager 管理应用所有用户设置
 /// 持久化层：ConfigManager (config.json) 作为 single source of truth
 final class SettingsManager {
+
+    private static let logger = Logger(subsystem: "com.urdao.voiceinput", category: "SettingsManager")
 
     // MARK: - Singleton
 
@@ -106,7 +109,7 @@ final class SettingsManager {
         if let oldKey = defaults.string(forKey: Keys.llmApiKey), !oldKey.isEmpty {
             if KeychainHelper.get(service: "com.urdao.voiceinput", account: "llmApiKey") == nil {
                 KeychainHelper.set(oldKey, service: "com.urdao.voiceinput", account: "llmApiKey")
-                fputs("[Settings] API Key 已从 UserDefaults 迁移到 Keychain\n", stderr)
+                Self.logger.info("API Key 已从 UserDefaults 迁移到 Keychain")
             }
             defaults.removeObject(forKey: Keys.llmApiKey)
         }
@@ -117,11 +120,11 @@ final class SettingsManager {
     private func migrateUserDefaultsToConfig() {
         // 已迁移则跳过
         guard !defaults.bool(forKey: Keys.configMigrated) else {
-            fputs("[Settings] 配置已迁移，跳过\n", stderr)
+            Self.logger.info("配置已迁移，跳过")
             return
         }
 
-        fputs("[Settings] 开始迁移 UserDefaults 配置到 ConfigManager...\n", stderr)
+        Self.logger.info("开始迁移 UserDefaults 配置到 ConfigManager...")
         let cfg = ConfigManager.shared
 
         // hotkeyMode
@@ -203,7 +206,7 @@ final class SettingsManager {
 
         // 标记迁移完成
         defaults.set(true, forKey: Keys.configMigrated)
-        fputs("[Settings] UserDefaults → ConfigManager 迁移完成\n", stderr)
+        Self.logger.info("UserDefaults → ConfigManager 迁移完成")
     }
 
     // MARK: - 热键模式
@@ -346,18 +349,18 @@ final class SettingsManager {
                 let plistData = try PropertyListSerialization.data(
                     fromPropertyList: plistDict, format: .xml, options: 0)
                 try plistData.write(to: plistPath)
-                fputs("[Settings] LaunchAgent plist 已写入: \(plistPath.path)\n", stderr)
+                Self.logger.info("LaunchAgent plist 已写入: \(plistPath.path)")
             } catch {
-                fputs("[Settings] ERROR: 无法写入 LaunchAgent plist: \(error)\n", stderr)
+                Self.logger.error("无法写入 LaunchAgent plist: \(error)")
             }
         } else {
             // 删除 plist
             if FileManager.default.fileExists(atPath: plistPath.path) {
                 do {
                     try FileManager.default.removeItem(at: plistPath)
-                    fputs("[Settings] LaunchAgent plist 已删除\n", stderr)
+                    Self.logger.info("LaunchAgent plist 已删除")
                 } catch {
-                    fputs("[Settings] ERROR: 无法删除 LaunchAgent plist: \(error)\n", stderr)
+                    Self.logger.error("无法删除 LaunchAgent plist: \(error)")
                 }
             }
         }
@@ -528,7 +531,7 @@ final class SettingsManager {
         cfg.set("presets.\(presetId).baseURL", value: llmApiBaseURL)
         cfg.set("presets.\(presetId).model", value: llmModel)
         llmActivePreset = presetId
-        fputs("[Settings] 保存预设 \(presetId): model=\(llmModel), baseURL=\(llmApiBaseURL)\n", stderr)
+        Self.logger.info("保存预设 \(presetId): model=\(self.llmModel), baseURL=\(self.llmApiBaseURL)")
     }
 
     /// 加载预设配置（如果之前保存过，恢复用户的自定义值）
@@ -543,7 +546,7 @@ final class SettingsManager {
 
         // 查找预设定义
         guard let preset = Self.llmPresets.first(where: { $0.id == presetId }) else {
-            fputs("[Settings] 未知预设: \(presetId)\n", stderr)
+            Self.logger.info("未知预设: \(presetId)")
             return
         }
 
@@ -565,7 +568,7 @@ final class SettingsManager {
         llmPostProcessingEnabled = true
         llmActivePreset = presetId
 
-        fputs("[Settings] 加载预设 \(presetId) (\(preset.name)): model=\(llmModel), baseURL=\(llmApiBaseURL), hasKey=\(!llmApiKey.isEmpty)\n", stderr)
+        Self.logger.info("加载预设 \(presetId) (\(preset.name)): model=\(self.llmModel), baseURL=\(self.llmApiBaseURL), hasKey=\(!self.llmApiKey.isEmpty)")
     }
 
     /// 获取预设已保存的 API Key（用于菜单显示）
@@ -622,7 +625,7 @@ final class SettingsManager {
         // 1. 用户数据目录（float32 模型下载到这里）
         let userPath = (Self.userModelDir as NSString).appendingPathComponent(fileName)
         if FileManager.default.fileExists(atPath: userPath) {
-            fputs("[Settings] 模型路径（用户目录）: \(userPath)\n", stderr)
+            Self.logger.info("模型路径（用户目录）: \(userPath)")
             return userPath
         }
 
