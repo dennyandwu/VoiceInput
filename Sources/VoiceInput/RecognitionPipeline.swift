@@ -312,16 +312,14 @@ class RecognitionPipeline {
         let duration = Double(audioData.count) / 16000.0
         let t0 = Date()
 
-        // 1. 短音频 Whisper 快速路径
-        if let result = recognizeShortAudio(audioData: audioData, duration: duration, startTime: t0) {
-            return result
-        }
+        // 方案 A: 移除短音频特殊路由，所有音频统一走 dual-engine 流程
+        // 原短音频 Whisper 快速路径已移除，短音频与长音频走相同流程
 
-        // 2. SenseVoice 第一遍识别
+        // 1. SenseVoice 第一遍识别
         let (senseVoiceResult, svText, svChinese, svASCII, svDom, detectedLang) =
             recognizeWithSenseVoice(audioData: audioData)
 
-        // 3. 日语/韩语误检拦截
+        // 2. 日语/韩语误检拦截
         if let result = handleLanguageMisdetection(
             audioData: audioData, svText: svText,
             detectedLang: detectedLang, duration: duration, startTime: t0
@@ -329,7 +327,7 @@ class RecognitionPipeline {
             return result
         }
 
-        // 4. 智能路由策略
+        // 3. 智能路由策略（含方案 C 语言模式）
         return routeToEngine(
             audioData: audioData,
             senseVoiceResult: senseVoiceResult,
@@ -338,35 +336,7 @@ class RecognitionPipeline {
         )
     }
 
-    // MARK: 1. 短音频 Whisper 快速路径
-
-    /// 短音频直接走 Whisper，返回 nil 表示不满足条件，继续后续流程
-    private func recognizeShortAudio(audioData: [Float], duration: Double, startTime: Date) -> PipelineResult? {
-        let shortThreshold = SettingsManager.shared.shortAudioThreshold
-        guard duration < shortThreshold && engine.hasWhisper else { return nil }
-
-        Self.logger.info("短音频（\(String(format: "%.1f", duration))s < \(String(format: "%.1f", shortThreshold))s）→ Whisper 直接处理")
-        let whisperResult = engine.recognizeWithWhisper(audioData: audioData, sampleRate: 16000)
-        let wText = whisperResult.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let elapsed = Date().timeIntervalSince(startTime)
-
-        if !wText.isEmpty {
-            Self.logger.info("Whisper 短音频结果: \"\(wText, privacy: .private)\" (\(String(format: "%.3f", elapsed))s)")
-            return PipelineResult(
-                text: wText,
-                lang: whisperResult.lang.isEmpty ? "<|en|>" : whisperResult.lang,
-                emotion: "", event: "",
-                audioSamples: audioData.count,
-                duration: duration,
-                processingTime: elapsed
-            )
-        }
-
-        Self.logger.info("Whisper 短音频返回空，回退 SenseVoice")
-        return nil
-    }
-
-    // MARK: 2. SenseVoice 第一遍识别
+    // MARK: 1. SenseVoice 第一遍识别
 
     /// 运行 SenseVoice 并返回识别结果及各项语言分析数据
     private func recognizeWithSenseVoice(audioData: [Float])
@@ -387,7 +357,7 @@ class RecognitionPipeline {
         return (senseVoiceResult, svText, svChinese, svASCII, svDom, detectedLang)
     }
 
-    // MARK: 3. 日语/韩语误检拦截
+    // MARK: 2. 日语/韩语误检拦截
 
     /// 拦截 SenseVoice 对短音频的日语/韩语误判，返回 nil 表示无误检，继续路由
     private func handleLanguageMisdetection(
@@ -427,7 +397,7 @@ class RecognitionPipeline {
         return PipelineResult(text: "", lang: "zh", emotion: "", event: "", audioSamples: 0, duration: duration, processingTime: 0)
     }
 
-    // MARK: 4. 智能路由策略
+    // MARK: 3. 智能路由策略（含方案 C 语言模式）
 
     /// 根据语言分析结果路由到最佳识别引擎，返回最终 PipelineResult
     private func routeToEngine(
@@ -438,12 +408,36 @@ class RecognitionPipeline {
     ) -> PipelineResult {
         var finalResult = senseVoiceResult
 
-        if svDom == "zh" {
-            Self.logger.info("路由: 纯中文 → SenseVoice")
-        } else if svDom == "en" {
+        // 方案 C: 语言模式优先路由
+        let languageMode = SettingsManager.shared.languageMode
+        switch languageMode {
+        case "zh":
+            // 仅中文：跳过 Whisper，直接用 SenseVoice 结果
+            Self.logger.info("路由: 语言模式=zh → SenseVoice（跳过 Whisper）")
+            // finalResult 已是 senseVoiceResult，直接跳到输出
+        case "en":
+            // 仅英文：优先 Whisper
+            Self.logger.info("路由: 语言模式=en → 优先 Whisper")
             finalResult = routeEnglish(audioData: audioData, fallback: senseVoiceResult)
-        } else {
-            finalResult = routeMixed(audioData: audioData, svChinese: svChinese, svASCII: svASCII, fallback: senseVoiceResult)
+        case "zh-en", "zh+en":
+            // 中英混合：走正常 dual-engine 路由
+            Self.logger.info("路由: 语言模式=zh-en → dual-engine 路由")
+            if svDom == "zh" {
+                Self.logger.info("路由: 纯中文 → SenseVoice")
+            } else if svDom == "en" {
+                finalResult = routeEnglish(audioData: audioData, fallback: senseVoiceResult)
+            } else {
+                finalResult = routeMixed(audioData: audioData, svChinese: svChinese, svASCII: svASCII, fallback: senseVoiceResult)
+            }
+        default:
+            // "auto" 或其他：走原始 dual-engine 路由逻辑
+            if svDom == "zh" {
+                Self.logger.info("路由: 纯中文 → SenseVoice")
+            } else if svDom == "en" {
+                finalResult = routeEnglish(audioData: audioData, fallback: senseVoiceResult)
+            } else {
+                finalResult = routeMixed(audioData: audioData, svChinese: svChinese, svASCII: svASCII, fallback: senseVoiceResult)
+            }
         }
 
         let elapsed = Date().timeIntervalSince(startTime)

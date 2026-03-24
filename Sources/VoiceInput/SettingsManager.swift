@@ -83,7 +83,7 @@ final class SettingsManager {
 
     static let llmPresets: [LLMPreset] = [
         // 云端
-        LLMPreset(id: "deepseek",  name: "DeepSeek",    defaultBaseURL: "https://api.deepseek.com",       defaultModel: "deepseek-chat",     needsApiKey: true),
+        LLMPreset(id: "deepseek",  name: "DeepSeek-V3",  defaultBaseURL: "https://api.deepseek.com/v1",       defaultModel: "deepseek-chat",     needsApiKey: true),
         LLMPreset(id: "qwen",      name: "通义千问",     defaultBaseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1", defaultModel: "qwen-turbo", needsApiKey: true),
         LLMPreset(id: "gemini",    name: "Gemini",      defaultBaseURL: "https://generativelanguage.googleapis.com/v1beta/openai", defaultModel: "gemini-2.0-flash", needsApiKey: true),
         LLMPreset(id: "openai",    name: "OpenAI",      defaultBaseURL: "https://api.openai.com/v1",      defaultModel: "gpt-4o-mini",       needsApiKey: true),

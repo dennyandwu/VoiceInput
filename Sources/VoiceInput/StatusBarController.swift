@@ -471,7 +471,7 @@ final class StatusBarController {
         llmMenu.addItem(presetsTitle)
 
         let presetDisplayInfo: [(id: String, icon: String, label: String, note: String)] = [
-            ("deepseek",   "🇨🇳", "DeepSeek",          "国内直连"),
+            ("deepseek",   "🇨🇳", "DeepSeek-V3",       "国内直连"),
             ("qwen",       "🇨🇳", "通义千问",           "免费额度"),
             ("gemini",     "🔷", "Gemini",            "需科学上网"),
             ("openai",     "🟢", "OpenAI",            "需科学上网"),
