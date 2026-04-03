@@ -147,7 +147,7 @@ class RecognitionPipeline {
 
     /// 停止录音并识别
     /// - Returns: 识别结果
-    func stopListening() -> PipelineResult {
+    func stopListening(quickMode: Bool = false) -> PipelineResult {
         guard isListening else {
             Self.logger.info("未在监听中")
             return PipelineResult(text: "", lang: "", emotion: "", event: "", audioSamples: 0, duration: 0, processingTime: 0)
@@ -196,7 +196,7 @@ class RecognitionPipeline {
             audioToRecognize = fullAudio
         }
 
-        return recognize(audioData: audioToRecognize)
+        return recognize(audioData: audioToRecognize, quickMode: quickMode)
     }
 
     // MARK: - 定时录音模式
@@ -303,7 +303,7 @@ class RecognitionPipeline {
 
     // MARK: - 内部：识别音频数据（流程编排）
 
-    private func recognize(audioData: [Float]) -> PipelineResult {
+    private func recognize(audioData: [Float], quickMode: Bool = false) -> PipelineResult {
         guard !audioData.isEmpty else {
             Self.logger.info("无有效音频数据")
             return PipelineResult(text: "", lang: "", emotion: "", event: "", audioSamples: 0, duration: 0, processingTime: 0)
@@ -311,6 +311,22 @@ class RecognitionPipeline {
 
         let duration = Double(audioData.count) / 16000.0
         let t0 = Date()
+
+        if quickMode {
+            // 快速模式：SenseVoice only，跳过 Whisper 和语言路由
+            let (senseVoiceResult, svText, _, _, _, _) = recognizeWithSenseVoice(audioData: audioData)
+            let elapsed = Date().timeIntervalSince(t0)
+            Self.logger.info("[QuickMode] 识别完成: \"\(svText, privacy: .private)\" (RTF=\(String(format: "%.3f", elapsed/max(duration, 0.001))))")
+            return PipelineResult(
+                text: senseVoiceResult.text,
+                lang: senseVoiceResult.lang,
+                emotion: senseVoiceResult.emotion,
+                event: senseVoiceResult.event,
+                audioSamples: audioData.count,
+                duration: duration,
+                processingTime: elapsed
+            )
+        }
 
         // 方案 A: 移除短音频特殊路由，所有音频统一走 dual-engine 流程
         // 原短音频 Whisper 快速路径已移除，短音频与长音频走相同流程

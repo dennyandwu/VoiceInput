@@ -287,6 +287,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Self.logger.info("⏹ 停止录音，识别中...")
         isRecording = false
 
+        // PTT 模式走快速路径（SenseVoice only），Toggle 模式走完整 pipeline
+        let quickMode = settings.hotkeyMode == .pushToTalk
+
         // 播放停止录音提示音
         NSSound(named: "Pop")?.play()
 
@@ -297,7 +300,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pipelineQueue.async { [weak self] in
             guard let self = self else { return }
 
-            let result = p.stopListening()
+            let result = p.stopListening(quickMode: quickMode)
 
             DispatchQueue.main.async {
                 self.handleRecognitionResult(result)
